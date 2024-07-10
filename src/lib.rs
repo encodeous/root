@@ -17,18 +17,4 @@ trait Address {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    fn make_addr<T: Address>(a: &T) -> &[u8; T::BYTES]{
-        let m: [u8; T::BYTES];
-        m
-    }
-    
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-
-        let x = bar::<4>().ip.len();
-        println!("{}", x);
-    }
 }
