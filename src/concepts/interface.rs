@@ -1,31 +1,28 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::rc::Rc;
-use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use crate::concepts::neighbour::Neighbour;
-use crate::framework::SystemNetwork;
+use crate::framework::{RoutingSystem};
 
-pub trait NetworkInterface<N: SystemNetwork> {
-    fn network_type(&self) -> N::NetworkTypes;
+pub trait NetworkInterface<T: RoutingSystem> {
     /// Self address of the interface
-    fn address(&self) -> Box<dyn NetworkAddress<N>>;
-    /// Interface Id
-    fn get_id(&self) -> u16;
+    fn address(&self) -> T::NetworkAddress;
+    fn address_type(&self) -> T::NetworkType;
+    // unique identifier for this interface
+    fn id(&self) -> T::InterfaceId;
     /// Cost to reach an address, 0xFFFF for Infinity
-    fn get_cost(&self, addr: &dyn NetworkAddress<N>) -> u16;
+    fn get_cost(&self, addr: &T::NetworkAddress) -> u16;
 }
 
-pub trait NetworkAddress<N: SystemNetwork> {
-    fn network_type(&self) -> N::NetworkTypes;
-    fn get_bytes(&self) -> Vec<u8>;
+pub trait AddressType<T: RoutingSystem> {
+    fn get_network_type(&self) -> T::NetworkType;
 }
 
 /// 3.2.3. The Interface Table (Entry)
-pub struct Interface<'s, N: SystemNetwork> {
-    pub net_if: Box<dyn NetworkInterface<N>>,
-    pub neighbours: HashMap<Box<dyn NetworkAddress<N>>, Box<Neighbour<'s, N>>>,
+pub struct Interface<'s, T: RoutingSystem> {
+    pub net_if: Box<dyn NetworkInterface<T>>,
+    pub neighbours: HashMap<T::NetworkAddress, Box<Neighbour<'s, T>>>,
     pub out_seqno: u16,
     pub timer_last_hello: Option<Instant>,
     pub timer_last_update: Option<Instant>

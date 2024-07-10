@@ -1,26 +1,33 @@
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
-use crate::concepts::interface::{Interface, NetworkAddress, NetworkInterface};
+use crate::concepts::interface::{Interface, AddressType, NetworkInterface};
 use crate::concepts::tlv::Tlv;
-use crate::router::PersistentStorage;
 
-pub trait SystemNetwork: Sized {
-    type NetworkTypes: Sized + TryFrom<u8> + Into<u8>;
-    fn get_interfaces(&self) -> Vec<Box<dyn NetworkInterface<Self>>>;
-}
+// pub trait SystemNetwork: Sized {
+//     type NetworkTypes: Sized + TryFrom<u8> + Into<u8>;
+//     fn get_interfaces(&self) -> Vec<Box<dyn NetworkInterface<Self>>>;
+// }
+// 
+// pub trait Routing {
+//     type AddressType: Sized + Hash + Eq + PartialEq;
+//     fn config() -> ProtocolParams {
+//         Default::default()
+//     }
+// }
 
-pub trait Routing {
-    type AddressType: Sized + Hash + Eq + PartialEq;
+pub trait RoutingSystem: Clone {
+    type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
+    type NetworkAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq;
+    type NetworkType: Sized + Hash + Eq + PartialEq;
+    type InterfaceId: Eq + PartialEq;
+    
     fn config() -> ProtocolParams {
         Default::default()
     }
-}
-
-pub trait Persistence{
-    fn save(data: &PersistentStorage);
-    fn load() -> PersistentStorage;
+    fn get_interfaces(&self) -> &[Box<dyn NetworkInterface<Self>>];
 }
 
 /// Appendix B. Protocol Parameters
@@ -33,7 +40,7 @@ pub struct ProtocolParams{
     pub route_expiry_time: Duration,
     pub base_request_timeout: Duration,
     pub urgent_timeout: Duration,
-    pub source_gc_time: Duration
+    pub source_gc_time: Duration,
 }
 impl Default for ProtocolParams{
     fn default() -> Self {
