@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use crate::{GraphInterface, GraphSystem};
+use root::router::Router;
+use crate::{GraphInterface, GraphSystem, PAddr};
 
 pub struct Graph {
     pub adj: Vec<(u8, u8, u16)>
 }
 
-pub fn build(input: &str) -> Vec<GraphSystem>{
+pub fn build<'s>(input: &'s str) -> Vec<GraphSystem>{
     let mut nodes: Vec<GraphSystem> = Vec::new();
 
     let mut graph: Graph = Graph{
@@ -35,13 +36,25 @@ pub fn build(input: &str) -> Vec<GraphSystem>{
             neigh,
             id: node
         };
-        let sys = GraphSystem{
-            interfaces: vec![
-                Box::new(itf)
-            ]
+        
+        let mut sys = GraphSystem::<'s>{
+            router: Router::new(node)
         };
-        sys.
+        
+        sys.router.add_interface(Box::new(itf));
+        
+        nodes.push(sys);
     }
 
     nodes
+}
+
+pub fn state(networks: &[GraphSystem]) -> Vec<(u8, u8, String)>{
+    let mut edges = Vec::<(u8, u8, String)>::new();
+    for net in networks {
+        for route in &net.router.routes{
+            edges.push((net.router.address, *route.0, format!("c={},nh={}", route.1.metric, route.1.next_hop.unwrap())))
+        }
+    }
+    edges
 }

@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 use crate::concepts::interface::{Interface, AddressType, NetworkInterface};
-use crate::concepts::tlv::Tlv;
+use crate::concepts::packet::Data;
 
 // pub trait SystemNetwork: Sized {
 //     type NetworkTypes: Sized + TryFrom<u8> + Into<u8>;
@@ -19,15 +19,20 @@ use crate::concepts::tlv::Tlv;
 // }
 
 pub trait RoutingSystem: Clone {
+    /// Address of the node on the routing network, MUST be globally unique
     type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
-    type NetworkAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq;
+    /// Address of a node on the physical network, may not be globally unique, and may be overlapping
+    type PhysicalAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq;
     type NetworkType: Sized + Hash + Eq + PartialEq;
-    type InterfaceId: Eq + PartialEq;
-    
+    type InterfaceId: Sized + Eq + PartialEq + Hash + Clone;
+    type MAC<T>: MACSystem<Self>;
     fn config() -> ProtocolParams {
         Default::default()
     }
-    fn get_interfaces(&self) -> &[Box<dyn NetworkInterface<Self>>];
+}
+
+pub trait MACSystem<T: RoutingSystem>{
+    
 }
 
 /// Appendix B. Protocol Parameters
