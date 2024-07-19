@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Root Routing Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-yaml-prebuilt@1.0.0/dist/monaco-editor.min.js"></script>
+</head>
+<body>
+
+<script type="module">
+    import {updateGraph, runSim} from "./index.mjs";
+    import yaml from "https://esm.sh/js-yaml";
+    var defaultConf = "";
+
+    let history = []
+
+    document.querySelector('#next').addEventListener('click', async () => {
+        let val = window.editor.getValue();
+        if(history.length === 0 || history[history.length - 1] !== val){
+            history.push(val)
+        }
+        let res = await runSim(val);
+        window.editor.getModel().setValue(res)
+        refresh()
+    })
+    document.querySelector('#back').addEventListener('click', async () => {
+        if(history.length !== 0){
+            let last = history.pop()
+            window.editor.getModel().setValue(last)
+            refresh()
+        }
+    })
+    document.querySelector('#update').addEventListener('click', async () => {
+        refresh()
+    })
+
+    function refresh(){
+        try{
+            let data = yaml.load(window.editor.getValue())
+            updateGraph(data)
+            console.log(data)
+        } catch (ex) {
+            console.error(ex)
+        }
+    }
+
+    fetch("./default.yaml")
+        .then(function (response) {
+            response.text().then(function (text) {
+                defaultConf = text;
+                window.editor = monaco.editor.create(document.getElementById('editor'), {
+                    automaticLayout: true,
+                    model: monaco.editor.createModel(defaultConf, 'yaml', monaco.Uri.parse('a://b/foo.yaml')),
+                });
+                refresh()
+            });
+        });
+
+    const diagnosticsOptions = {
+        enableSchemaRequest: true,
+        hover: true,
+        completion: true,
+        validate: true,
+        format: true,
+    };
+
+    // YAML specific API
+    monacoYaml.setDiagnosticsOptions(diagnosticsOptions);
+</script>
+
+<div class="container">
+
+    <div class="input">
+        <h1>Visualizer</h1>
+        <div id="editor">
+        </div>
+        <div style="display: flex; flex-direction: row">
+            <button id="back" style="height: 30px">Step Back</button>
+            <button id="next" style="height: 30px">Next Step</button>
+            <button id="update" style="height: 30px">Update Graph</button>
+        </div>
+
+    </div>
+    <div id="vis">
+
+    </div>
+
+</div>
+
+
+</body>
+<style>
+    html, body {
+        height: 100%;
+        width: 100%;
+    }
+
+    .container {
+        height: 100%;
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+    }
+
+    .input {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 10px 10px 20px;
+    }
+
+    #vis {
+        flex-grow: 1;
+        background-color: #e8e8e8;
+    }
+
+    #editor {
+        height: 100%;
+    }
+</style>
+</html>

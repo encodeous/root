@@ -1,14 +1,15 @@
-use std::cmp::Ordering;
 use std::time::Instant;
+use serde::{Deserialize, Serialize};
 use crate::concepts::neighbour::Neighbour;
 use crate::framework::{RoutingSystem};
 
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
-pub enum Data<T: RoutingSystem> {
-    RouteUpdate {
-        /// Secured source information signed by the source (address, node-id, seqno)
-        source: T::MAC<(T::NodeAddress, u16)>,
-        metric: u16
+#[derive(Clone)]
+pub enum Packet<T: RoutingSystem> {
+    /// this is a single, unscheduled update that should be sent immediately.
+    RouteUpdate(RouteUpdate<T>),
+    /// this is a batch, full-table update that should only be sent periodically to all nodes
+    BatchRouteUpdate {
+        routes: Vec<RouteUpdate<T>>
     },
     RouteRequest {
         /// the source to request information for
@@ -16,14 +17,9 @@ pub enum Data<T: RoutingSystem> {
         dedup: [u8; 16]
     }
 }
-
-pub struct IncomingData<'system, T: RoutingSystem> {
-    pub data: T::MAC<Data<T>>,
-    pub neighbour: &'system Neighbour<'system, T>
-}
-
-pub struct OutgoingData<'system, T: RoutingSystem> {
-    pub send_at: Instant,
-    pub data: T::MAC<Data<T>>,
-    pub neighbour: &'system Neighbour<'system, T>
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RouteUpdate<T: RoutingSystem> {
+    /// Secured source information signed by the source (address, seqno)
+    pub source: T::MAC<(T::NodeAddress, u16)>,
+    pub metric: u16
 }

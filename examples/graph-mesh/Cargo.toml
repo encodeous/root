@@ -5,3 +5,13 @@ edition = "2021"
 
 [dependencies]
 root = {path = "root"}
+serde = { version = "1.0.204", features = ["derive"] }
+hyper = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["full"] }
+yaml-rust2 = {version = "0.8", features = ["default", "debug_prints"]}
+anyhow = "1.0.86"
+hyper-staticfile = "0.10.1"
+mime_guess = "2.0.5"
+linear-map = "1.2.0"

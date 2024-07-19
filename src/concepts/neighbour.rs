@@ -8,12 +8,11 @@ use std::time::{Duration, Instant};
 use crate::concepts::interface::{NetworkInterface, AddressType, Interface};
 use anyhow::{anyhow, Context, Result};
 use crate::concepts::route::{Route};
-use crate::concepts::packet::{Data, IncomingData};
 use crate::framework::{RoutingSystem};
 use crate::router::{INF, Router};
 
 /// 3.2.4. The Neighbour Table
-pub struct Neighbour<'owner, T: RoutingSystem> {
+pub struct Neighbour<T: RoutingSystem> {
     /// the physical interface where the neighbour resides
     pub itf: T::InterfaceId,
     /// the physical address of the neighbouring interface
@@ -22,14 +21,14 @@ pub struct Neighbour<'owner, T: RoutingSystem> {
     pub addr: T::NodeAddress,
     // pub hello_interval: Duration,
     // pub timer_last_ihu: Instant,
-    pub routes: HashMap<T::NodeAddress, Route<'owner, T>>
+    pub routes: HashMap<T::NodeAddress, Route<T>>
 }
 
-impl <'owner, T: RoutingSystem> Neighbour<'owner, T>{
+impl <T: RoutingSystem> Neighbour<T>{
     
 }
 
-impl <'owner, T: RoutingSystem> PartialEq for Neighbour<'owner, T>{
+impl <T: RoutingSystem> PartialEq for Neighbour<T>{
     fn eq(&self, other: &Self) -> bool {
         // same neighbour if they share the same interface and network address
         

@@ -1,11 +1,14 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
+use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use crate::concepts::interface::{Interface, AddressType, NetworkInterface};
-use crate::concepts::packet::Data;
-
+use crate::concepts::packet::Packet;
+use crate::router::Router;
 // pub trait SystemNetwork: Sized {
 //     type NetworkTypes: Sized + TryFrom<u8> + Into<u8>;
 //     fn get_interfaces(&self) -> Vec<Box<dyn NetworkInterface<Self>>>;
@@ -20,47 +23,36 @@ use crate::concepts::packet::Data;
 
 pub trait RoutingSystem: Clone {
     /// Address of the node on the routing network, MUST be globally unique
-    type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
+    type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Display;
     /// Address of a node on the physical network, may not be globally unique, and may be overlapping
-    type PhysicalAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq;
+    type PhysicalAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq + Display;
     type NetworkType: Sized + Hash + Eq + PartialEq;
     type InterfaceId: Sized + Eq + PartialEq + Hash + Clone;
-    type MAC<T>: MACSystem<Self>;
+    type MAC<T: Clone>: MACSystem<T, Self>;
+    /// type used for deduplication
+    type DedupType: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
     fn config() -> ProtocolParams {
         Default::default()
     }
 }
 
-pub trait MACSystem<T: RoutingSystem>{
-    
+pub trait MACSystem<V: Clone, T: RoutingSystem>: Clone{
+    fn data(&self) -> &V;
+    fn data_mut(&mut self) -> &mut V;
+    fn validate(&self, subject: &T::NodeAddress) -> bool;
+    fn sign(data: V, router: &Router<T>) -> T::MAC<V>;
 }
 
 /// Appendix B. Protocol Parameters
 pub struct ProtocolParams{
-    pub hello_interval: Duration,
-    pub link_cost: u8,
-    pub ihu_interval: Duration,
-    pub update_interval: Duration,
-    pub ihu_hold_time: Duration,
-    pub route_expiry_time: Duration,
-    pub base_request_timeout: Duration,
-    pub urgent_timeout: Duration,
-    pub source_gc_time: Duration,
+    pub dedup_ttl: Duration,
+    pub cleanup_timer: Duration
 }
 impl Default for ProtocolParams{
     fn default() -> Self {
-        // sensible defaults from Appendix B. Protocol Parameters
-        let hello = 4000;
         Self{
-            hello_interval: Duration::from_millis(hello),
-            link_cost: 96,
-            ihu_interval: Duration::from_millis(hello * 3),
-            update_interval: Duration::from_millis(hello * 4),
-            ihu_hold_time: Duration::from_millis((hello as f64 * 3.0 * 3.5) as u64),
-            route_expiry_time: Duration::from_millis((hello as f64 * 4.0 * 3.5) as u64),
-            base_request_timeout: Duration::from_millis(2000),
-            urgent_timeout: Duration::from_millis(200),
-            source_gc_time: Duration::from_secs(60 * 3),
+            dedup_ttl: Duration::from_secs(60),
+            cleanup_timer: Duration::from_secs(15),
         }
     }
 }
