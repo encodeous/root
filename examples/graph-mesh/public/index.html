@@ -12,51 +12,62 @@
 <script type="module">
     import {updateGraph, runSim} from "./index.mjs";
     import yaml from "https://esm.sh/js-yaml";
-    var defaultConf = "";
+    import LZString from "https://esm.sh/lz-string"
+    var curConf = "";
 
     let history = []
 
-    document.querySelector('#next').addEventListener('click', async () => {
-        let val = window.editor.getValue();
+    document.querySelector('#sim').addEventListener('click', async () => {
+        let val = window.mEditor.getValue();
         if(history.length === 0 || history[history.length - 1] !== val){
             history.push(val)
         }
         let res = await runSim(val);
-        window.editor.getModel().setValue(res)
+        window.mEditor.getModel().setValue(res)
         refresh()
     })
     document.querySelector('#back').addEventListener('click', async () => {
         if(history.length !== 0){
             let last = history.pop()
-            window.editor.getModel().setValue(last)
+            window.mEditor.getModel().setValue(last)
             refresh()
         }
     })
     document.querySelector('#update').addEventListener('click', async () => {
         refresh()
     })
+    let selector = document.querySelector('#graph-select')
+    selector.addEventListener('change', async () => {
+        console.log(selector.value)
+        await loadFile(selector.value)
+    })
+
+    async function loadFile(file){
+        let res = await fetch("./networks/" + file);
+        let text = await res.text();
+        curConf = text;
+        if(!window.mEditor){
+            window.mEditor = monaco.editor.create(document.getElementById('editor'), {
+                automaticLayout: true,
+                model: monaco.editor.createModel(curConf, 'yaml', monaco.Uri.parse('a://b/foo.yaml')),
+            });
+        }
+        window.mEditor.getModel().setValue(text)
+        refresh()
+    }
 
     function refresh(){
         try{
-            let data = yaml.load(window.editor.getValue())
+            let data = yaml.load(window.mEditor.getValue())
             updateGraph(data)
             console.log(data)
         } catch (ex) {
             console.error(ex)
         }
+        var queryParams = new URLSearchParams(window.location.search);
+        queryParams.set("graph", LZString.compressToBase64(window.mEditor.getValue()))
+        window.history.pushState(null, null, "?"+queryParams.toString());
     }
-
-    fetch("./default.yaml")
-        .then(function (response) {
-            response.text().then(function (text) {
-                defaultConf = text;
-                window.editor = monaco.editor.create(document.getElementById('editor'), {
-                    automaticLayout: true,
-                    model: monaco.editor.createModel(defaultConf, 'yaml', monaco.Uri.parse('a://b/foo.yaml')),
-                });
-                refresh()
-            });
-        });
 
     const diagnosticsOptions = {
         enableSchemaRequest: true,
@@ -68,17 +79,49 @@
 
     // YAML specific API
     monacoYaml.setDiagnosticsOptions(diagnosticsOptions);
+
+    var queryParams = new URLSearchParams(window.location.search);
+    if(queryParams.has("graph")){
+        curConf = LZString.decompressFromBase64(queryParams.get("graph"));
+        if(!window.mEditor){
+            window.mEditor = monaco.editor.create(document.getElementById('editor'), {
+                automaticLayout: true,
+                model: monaco.editor.createModel(curConf, 'yaml', monaco.Uri.parse('a://b/foo.yaml')),
+            });
+        }
+        window.mEditor.getModel().setValue(curConf)
+        refresh()
+    }
+    else{
+        loadFile("default.yaml")
+    }
+
+</script>
+
+<script type="module">
+    let select = document.getElementById('graph-select');
+
+    let options = await (await fetch("/networks/options.json")).json()
+
+    for(let [file, desc] of Object.entries(options["graphs"])) {
+        var opt = document.createElement('option');
+        opt.value = file;
+        opt.innerHTML = desc;
+        select.appendChild(opt);
+    }
 </script>
 
 <div class="container">
 
     <div class="input">
-        <h1>Visualizer</h1>
+        <h1>Routing Visualizer</h1>
+        <select id="graph-select">
+        </select>
         <div id="editor">
         </div>
         <div style="display: flex; flex-direction: row">
             <button id="back" style="height: 30px">Step Back</button>
-            <button id="next" style="height: 30px">Next Step</button>
+            <button id="sim" style="height: 30px">Simulate</button>
             <button id="update" style="height: 30px">Update Graph</button>
         </div>
 
@@ -105,7 +148,7 @@
     }
 
     .input {
-        flex-grow: 1;
+        width: 40%;
         display: flex;
         flex-direction: column;
         padding: 10px 10px 20px;

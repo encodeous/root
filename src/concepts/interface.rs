@@ -15,8 +15,8 @@ pub trait NetworkInterface<T: RoutingSystem> {
     fn id(&self) -> T::InterfaceId;
     /// Cost to reach an address, 0xFFFF for Infinity. Lower is better.
     /// Calculate the link cost offline, this method should not perform I/O
+    /// Return INF if the link goes down
     fn get_cost(&self, addr: &T::PhysicalAddress) -> u16;
-    fn is_connected(&self, addr: &T::PhysicalAddress) -> bool;
     fn get_neighbours(&self) -> Vec<(T::PhysicalAddress, T::NodeAddress)>;
 }
 

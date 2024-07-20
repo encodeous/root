@@ -8,14 +8,19 @@ export let cy = cytoscape({
             {
                 selector: 'node',
                 style: {
-                    'label': 'data(id)'
+                    'label': 'data(label)',
+                    'text-halign': 'center',
+                    'text-valign': 'center',
+                    'color': 'black'
                 }
             },
             {
                 selector: 'edge',
                 style: {
                     'label': 'data(weight)',
-                    'line-color': 'data(color)'
+                    'line-color': 'data(color)',
+                    'arrow-scale': '1',
+                    'curve-style': 'bezier'
                 }
             },
             {
@@ -25,11 +30,36 @@ export let cy = cytoscape({
                 }
             },
             {
-                selector: '.error',
+                selector: '.infeasible',
+                style: {
+                    'line-color': 'orange',
+                    "background-color": 'orange'
+                }
+            },
+            {
+                selector: '.fake',
                 style: {
                     'line-color': 'red'
                 }
-            }
+            },
+            {
+                selector: '.forward',
+                style: {
+                    'target-arrow-shape': 'triangle'
+                }
+            },
+            {
+                selector: '.backward',
+                style: {
+                    'source-arrow-shape': 'triangle'
+                }
+            },
+            {
+                selector: ':selected',
+                style: {
+                    'background-color': '#87CEEB'
+                }
+            },
         ]
     }
 )
@@ -93,6 +123,14 @@ function orderedPair(a, b) {
     }
 }
 
+function orderedPairTuple(a, b) {
+    if (a < b) {
+        return {x:a,y:b}
+    } else {
+        return {x:b,y:a}
+    }
+}
+
 function parseEdge(edge){
     let x = edge.split(" ")
     let a = parseInt(x[0]);
@@ -112,6 +150,14 @@ function parseRoute(route){
     }
 }
 
+function getEdgeDirection(a,b){
+    let {x,y} = orderedPairTuple(a,b);
+    if(x === a){
+        return "forward"
+    }
+    return "backward"
+}
+
 let curData = null;
 let selected = null;
 let highlighting = false;
@@ -120,13 +166,17 @@ function highlight(){
     for(let ele of cy.mutableElements()){
         if(ele.id() !== selected)
             ele.deselect()
+
+        ele.removeClass("forward")
+        ele.removeClass("backward")
     }
     recalcGraph(curData)
     if(selected == null) return;
     let nodeId = parseInt(selected.substring(1,2));
     console.log(nodeId)
-    let ok = new Set();
-    let error = new Set;
+    let feasible = new Set();
+    let infeasible = new Set();
+    let fake = new Set();
     let labels = {}
     for (let node in curData["nodes"]) {
         let dstId = parseInt(node);
@@ -134,41 +184,70 @@ function highlight(){
             continue;
         }
         console.log(`To: ${node}`)
-        let path = getNodePath(nodeId, dstId);
+        let path = getNodePath(nodeId, dstId, 0);
         console.log(path)
-        let connected = path.length !== 0 && path[0] === dstId;
-        console.log(connected)
-        let err = path.length !== 0 && !connected;
         for(let i = 0; i < path.length - 1; i++){
-            let a = path[i];
-            let b = path[i+1];
-            if(connected){
-                ok.add("e" + orderedPair(a,b));
+            let a = path[i][0];
+            let b = path[i+1][0];
+            let aGood = path[i][1] !== 65535;
+            let bGood = path[i+1][1] !== 65535;
+            let edgeId = "e" + orderedPair(a,b);
+            if(aGood && bGood){
+                feasible.add(edgeId);
             }
-            else if(err){
-                err.add("e" + orderedPair(a,b));
+            else{
+                infeasible.add(edgeId);
+                if(!aGood)
+                    infeasible.add("n" + a);
+                if(!bGood)
+                    infeasible.add("n" + b);
             }
+            if(!cy.hasElementWithId(edgeId)){
+                fake.add(edgeId);
+                infeasible.add("n" + a);
+                infeasible.add("n" + b);
+                let {x,y} = orderedPairTuple(a,b);
+                cy.add({
+                    group: 'edges',
+                    data: {
+                        id: edgeId,
+                        source: "n" + x,
+                        target: "n" + y,
+                        weight: "inf",
+                        color: "white"
+                    }
+                })
+            }
+            let ele = cy.getElementById(edgeId)
+            ele.addClass(getEdgeDirection(a,b))
         }
     }
     for(let ele of cy.mutableElements()){
-        ele.removeClass("error")
+        ele.removeClass("infeasible")
+        ele.removeClass("fake")
         ele.removeClass("ok")
-        if(ok.has(ele.id())){
+        if(feasible.has(ele.id())){
             console.log(ele)
             ele.addClass("ok")
         }
-        if(error.has(ele.id())){
-            ele.addClass("error")
+        if(infeasible.has(ele.id())){
+            ele.removeClass("ok")
+            ele.addClass("infeasible")
+        }
+        if(fake.has(ele.id())){
+            ele.removeClass("infeasible")
+            ele.addClass("fake")
         }
     }
+
     highlighting = false;
 }
 
-function getNodePath(from, dst) {
+function getNodePath(from, dst, cost) {
     if(from === dst){
-        return [dst]
+        return [[dst, cost]]
     }
-    console.log(`${from}->${dst}`)
+    console.log(`${from}->${dst} c=${cost}`)
     for(let route of curData["routes"][from]){
         if(!route.endsWith("self")){
             let parsed = parseRoute(route);
@@ -176,7 +255,8 @@ function getNodePath(from, dst) {
             // console.log(parsed)
             if(src === dst){
                 // console.log("matched!")
-                return [...getNodePath(nextHop, dst), from]
+                let nc = (metric === 65535 || cost === 65535) ? 65535 : (cost + metric);
+                return [[from, cost], ...getNodePath(nextHop, dst, nc)]
             }
         }
     }
@@ -201,7 +281,6 @@ export function updateGraph(data){
     recalcGraph(data)
     cy.centre()
     highlight()
-
 }
 
 export function recalcGraph(data) {
@@ -225,16 +304,20 @@ export function recalcGraph(data) {
         let id = "e" + orderedPair(a, b)
         ids.add(id)
         if (!cy.hasElementWithId(id)) {
+            let {x,y} = orderedPairTuple(a,b);
             cy.add({
                 group: 'edges',
                 data: {
                     id: id,
-                    source: "n" + a,
-                    target: "n" + b,
+                    source: "n" + x,
+                    target: "n" + y,
                     weight: c,
                     color: "white"
                 }
             })
+        }
+        else{
+            cy.getElementById(id).data("weight", c)
         }
     }
 

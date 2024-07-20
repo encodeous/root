@@ -102,7 +102,7 @@ impl<T: RoutingSystem> Router<T>{
     pub fn refresh_interfaces(&mut self) {
         for (id, itf) in &mut self.interfaces{
             // pull data from network interfaces
-            itf.neighbours.retain(|_,v| itf.net_if.is_connected(&v.addr_phy));
+            itf.neighbours.retain(|_,v| itf.net_if.get_cost(&v.addr_phy) != INF);
             for (phy, addr) in itf.net_if.get_neighbours() {
                 if let Some(val) = itf.neighbours.get_mut(&addr) {
                     if val.addr_phy == phy {
@@ -135,40 +135,81 @@ impl<T: RoutingSystem> Router<T>{
     
     // region Route Selection
 
-    fn is_feasible(selected_route: &Route<T>, new_route: &Route<T>, metric: u16) -> Option<u16>{
+    fn is_feasible(selected_route: &Route<T>, new_route: &Route<T>, new_neighbour: T::NodeAddress, metric: u16) -> Option<u16>{
+        if let Some(nh) = &selected_route.next_hop{
+            if metric == INF && *nh == new_neighbour{
+                return Some(INF);
+            }
+        }
         if let Some(fd) = selected_route.fd{
             let (_, s_seqno) = selected_route.source.data();
             let (_, n_seqno) = new_route.source.data();
             if seqno_less_than(*n_seqno, *s_seqno){
                 return None;
             }
-            if metric < fd || seqno_less_than(*s_seqno, *n_seqno) {
+            if 
+                metric < fd || seqno_less_than(*s_seqno, *n_seqno)
+                || (metric == fd && selected_route.metric == INF) // we want to restore the route if it was down
+            {
                 return Some(metric);
             }
         }
         None
     }
     
-    /// Recalculate metrics based on current data
+    /// Recalculate routes based on current data
     pub fn update_routes(&mut self){
+        // handle route retractions
+        for (addr, route) in &mut self.routes{
+            if let Some(nh) = &route.next_hop{
+                if let Some(itf) = &route.itf{ // this should always be true if the next hop exists
+                    if let Some(x) = self.interfaces.get(itf){
+                        if let None = x.neighbours.get(nh) {
+                            // disconnected route, should retract
+                            route.metric = INF;
+                        }
+                    }
+                }
+            }
+        }
         for (id, itf) in &mut self.interfaces{
-            for neigh in itf.neighbours.values_mut() {
+            for (n_addr, neigh) in &itf.neighbours {
                 let cost = itf.net_if.get_cost(&neigh.addr_phy);
+                
+                if cost == INF{
+                    println!("Retracted");
+                }
 
                 for (src, neigh_route) in &neigh.routes{
                     let metric = sum_inf(cost, neigh_route.metric);
-                    
                     let entry = self.routes.get_mut(src);
 
                     // update route table if there are better entries
                     if let Some(table_route) = entry{
-                        if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric){
+                        if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, n_addr.clone(), metric){
                             // we have a better route!
+                            // or a route has been retracted
                             table_route.next_hop = Some(neigh.addr.clone());
                             table_route.metric = metric;
                             table_route.source = neigh_route.source.clone();
                             table_route.fd = Some(new_fd);
                             table_route.itf = Some(id.clone());
+                        }
+                        else if let Some(nh) = &table_route.next_hop {
+                            if nh == n_addr{
+                                // update route metric
+                                if let Some(fd) = table_route.fd{
+                                    if metric > fd{
+                                        // infeasible route
+                                        table_route.metric = INF;
+                                    }
+                                    else{
+                                        // same or better route
+                                        table_route.metric = metric;
+                                        table_route.fd = Some(metric);
+                                    }
+                                }
+                            }
                         }
                     }
                     else{

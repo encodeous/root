@@ -3,6 +3,7 @@ use crate::graph_parse::State;
 pub fn tick_state(state: &mut State){
     let broadcast = *state.config.entry("broadcast_updates".to_string()).or_insert(false);
     let update_routes = *state.config.entry("update_routes".to_string()).or_insert(true);
+    let refresh_interfaces = *state.config.entry("refresh_interfaces".to_string()).or_insert(true);
 
     for node in state.nodes.iter_mut() {
         if let Some(packets) = state.packets.get(&node.router.address){
@@ -14,6 +15,9 @@ pub fn tick_state(state: &mut State){
     state.packets.clear();
 
     for node in state.nodes.iter_mut() {
+        if refresh_interfaces {
+            node.router.refresh_interfaces()
+        }
         if update_routes{
             node.router.update_routes();
         }

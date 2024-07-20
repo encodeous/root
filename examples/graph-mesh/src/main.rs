@@ -25,7 +25,7 @@ use tokio::net::TcpListener;
 use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 use yaml_rust2::yaml::Hash;
 use root::concepts::packet::Packet;
-use crate::graph_parse::{build, load, save, state, State};
+use crate::graph_parse::{load, save, State};
 use crate::PAddr::GraphNode;
 use crate::NType::GraphT1;
 use crate::sim::tick_state;
@@ -142,13 +142,6 @@ impl NetworkInterface<GraphSystem> for GraphInterface{
             return self.neigh[id]
         }
         INF
-    }
-
-    fn is_connected(&self, addr: &PAddr) -> bool {
-        if let GraphNode(id) = addr{
-            return self.neigh.contains_key(id);
-        }
-        false
     }
 
     fn get_neighbours(&self) -> Vec<(PAddr, u8)> {

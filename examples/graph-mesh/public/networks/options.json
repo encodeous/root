@@ -1,0 +1,7 @@
+{
+    "graphs": {
+        "default.yaml": "Simple Weighted Graph",
+        "unweighted.yaml": "Simple Unweghted Graph",
+        "loop.yaml": "Loop Avoidance"
+    }
+}
