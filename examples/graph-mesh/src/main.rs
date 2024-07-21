@@ -44,7 +44,7 @@ impl Clone for GraphSystem{
     }
 }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Serialize, Deserialize)]
 enum PAddr {
     GraphNode(u8)
 }
@@ -80,7 +80,7 @@ impl RoutingSystem for GraphSystem{
     type PhysicalAddress = PAddr;
     type NetworkType = NType;
     type InterfaceId = u8;
-    type MAC<T: Clone> = DummyMAC<T>;
+    type MAC<T: Clone + Serialize + DeserializeOwned> = DummyMAC<T>;
     type DedupType = [u8; 16];
 }
 
@@ -98,7 +98,7 @@ impl<V: Clone> Clone for DummyMAC<V> {
     }
 }
 
-impl<V: Clone> MACSystem<V, GraphSystem>  for DummyMAC<V>{
+impl<V: Clone + Serialize + DeserializeOwned> MACSystem<V, GraphSystem> for DummyMAC<V>{
     fn data(&self) -> &V {
         &self.data
     }
@@ -155,7 +155,7 @@ impl NetworkInterface<GraphSystem> for GraphInterface{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 9999));
+    let addr = SocketAddr::from(([0,0,0,0], 9999));
 
     // We create a TcpListener and bind it to 127.0.0.1:3000
     let listener = TcpListener::bind(addr).await?;

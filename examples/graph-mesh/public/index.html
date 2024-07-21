@@ -13,7 +13,7 @@
     import {updateGraph, runSim} from "./index.mjs";
     import yaml from "https://esm.sh/js-yaml";
     import LZString from "https://esm.sh/lz-string"
-    var curConf = "";
+    export let curConf = "";
 
     let history = []
 
@@ -37,6 +37,10 @@
         refresh()
     })
     let selector = document.querySelector('#graph-select')
+    document.querySelector('#reset').addEventListener('click', async () => {
+        await loadFile(selector.value)
+        window.history.replaceState( {} , null, "/" );
+    })
     selector.addEventListener('change', async () => {
         console.log(selector.value)
         await loadFile(selector.value)
@@ -82,7 +86,16 @@
 
     var queryParams = new URLSearchParams(window.location.search);
     if(queryParams.has("graph")){
-        curConf = LZString.decompressFromBase64(queryParams.get("graph"));
+        setText(LZString.decompressFromBase64(queryParams.get("graph")))
+        refresh()
+    }
+    else{
+        await loadFile("default.yaml")
+        window.history.replaceState( {} , null, "/" );
+    }
+
+    export function setText(newText){
+        curConf = newText;
         if(!window.mEditor){
             window.mEditor = monaco.editor.create(document.getElementById('editor'), {
                 automaticLayout: true,
@@ -90,11 +103,9 @@
             });
         }
         window.mEditor.getModel().setValue(curConf)
-        refresh()
     }
-    else{
-        loadFile("default.yaml")
-    }
+
+    window.setEditorText = setText
 
 </script>
 
@@ -114,15 +125,20 @@
 <div class="container">
 
     <div class="input">
-        <h1>Routing Visualizer</h1>
+        <h1 style="margin: 0; padding: 0;">"Root"ing Visualizer</h1>
+        <p>
+            This is a simple visualizer of the "root" crate. It only demonstrates a subset of the possible features
+        </p>
         <select id="graph-select">
         </select>
         <div id="editor">
         </div>
         <div style="display: flex; flex-direction: row">
+            <button id="reset" style="height: 30px">Reset</button>
             <button id="back" style="height: 30px">Step Back</button>
             <button id="sim" style="height: 30px">Simulate</button>
             <button id="update" style="height: 30px">Update Graph</button>
+            <button id="seqno" style="height: 30px; display: none">Request Seqno</button>
         </div>
 
     </div>

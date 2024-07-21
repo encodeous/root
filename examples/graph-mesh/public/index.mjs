@@ -1,5 +1,6 @@
 import cytoscape from "./cytoscape.esm.min.mjs";
 import cola from "https://esm.sh/cytoscape-cola"
+import yaml from "https://esm.sh/js-yaml";
 
 cytoscape.use(cola);
 export let cy = cytoscape({
@@ -169,6 +170,9 @@ function highlight(){
 
         ele.removeClass("forward")
         ele.removeClass("backward")
+        ele.removeClass("infeasible")
+        ele.removeClass("fake")
+        ele.removeClass("ok")
     }
     recalcGraph(curData)
     if(selected == null) return;
@@ -177,13 +181,19 @@ function highlight(){
     let feasible = new Set();
     let infeasible = new Set();
     let fake = new Set();
-    let labels = {}
+    for(let route of curData["routes"][nodeId]){
+        let {src, nextHop, seq, metric, feasibility} = parseRoute(route)
+        if(metric === 65535)
+            infeasible.add("n" + src);
+    }
+
     for (let node in curData["nodes"]) {
         let dstId = parseInt(node);
         if(dstId === nodeId){
             continue;
         }
         console.log(`To: ${node}`)
+
         let path = getNodePath(nodeId, dstId, 0);
         console.log(path)
         for(let i = 0; i < path.length - 1; i++){
@@ -197,10 +207,6 @@ function highlight(){
             }
             else{
                 infeasible.add(edgeId);
-                if(!aGood)
-                    infeasible.add("n" + a);
-                if(!bGood)
-                    infeasible.add("n" + b);
             }
             if(!cy.hasElementWithId(edgeId)){
                 fake.add(edgeId);
@@ -226,13 +232,12 @@ function highlight(){
         ele.removeClass("infeasible")
         ele.removeClass("fake")
         ele.removeClass("ok")
-        if(feasible.has(ele.id())){
-            console.log(ele)
-            ele.addClass("ok")
-        }
         if(infeasible.has(ele.id())){
-            ele.removeClass("ok")
             ele.addClass("infeasible")
+        }
+        if(feasible.has(ele.id())){
+            ele.removeClass("infeasible")
+            ele.addClass("ok")
         }
         if(fake.has(ele.id())){
             ele.removeClass("infeasible")
@@ -263,9 +268,12 @@ function getNodePath(from, dst, cost) {
     return []
 }
 
+let seqno = document.querySelector('#seqno')
+
 cy.on('tap', 'node', function(evt){
     selected = evt.target.id();
     highlight()
+    seqno.style.display = 'block'
 });
 
 cy.on('unselect', function(evt){
@@ -273,9 +281,23 @@ cy.on('unselect', function(evt){
     let tgt = evt.target.id();
     if(selected === tgt){
         selected = null;
+        seqno.style.display = 'none'
         console.log("unselected all nodes")
     }
 });
+
+seqno.addEventListener('click', async () => {
+    if(!curData["actions"]){
+        curData["actions"] = {}
+    }
+    if(!curData["actions"]["req"]){
+        curData["actions"]["req"] = []
+    }
+    curData["actions"]["req"].push(
+        selected.substring(1,2)
+    )
+    window.setEditorText(yaml.dump(curData))
+})
 
 export function updateGraph(data){
     recalcGraph(data)

@@ -23,12 +23,12 @@ use crate::router::Router;
 
 pub trait RoutingSystem: Clone {
     /// Address of the node on the routing network, MUST be globally unique
-    type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Display;
+    type NodeAddress: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Serialize + DeserializeOwned;
     /// Address of a node on the physical network, may not be globally unique, and may be overlapping
-    type PhysicalAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq + Display;
+    type PhysicalAddress: Sized + AddressType<Self> + Hash + Eq + PartialEq + Serialize + DeserializeOwned;
     type NetworkType: Sized + Hash + Eq + PartialEq;
-    type InterfaceId: Sized + Eq + PartialEq + Hash + Clone;
-    type MAC<T: Clone>: MACSystem<T, Self>;
+    type InterfaceId: Sized + Eq + PartialEq + Hash + Clone + Serialize + DeserializeOwned;
+    type MAC<T: Clone + Serialize + DeserializeOwned>: MACSystem<T, Self>;
     /// type used for deduplication
     type DedupType: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
     fn config() -> ProtocolParams {
@@ -36,7 +36,7 @@ pub trait RoutingSystem: Clone {
     }
 }
 
-pub trait MACSystem<V: Clone, T: RoutingSystem>: Clone{
+pub trait MACSystem<V: Clone + Serialize + DeserializeOwned, T: RoutingSystem>: Clone + Serialize + DeserializeOwned{
     fn data(&self) -> &V;
     fn data_mut(&mut self) -> &mut V;
     fn validate(&self, subject: &T::NodeAddress) -> bool;

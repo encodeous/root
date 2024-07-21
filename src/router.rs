@@ -3,53 +3,24 @@ use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::time::Instant;
 use log::{error, trace, warn};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use crate::add;
 use crate::concepts::interface::{Interface, NetworkInterface};
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{Packet, RouteUpdate};
-use crate::concepts::route::{Route};
+use crate::concepts::route::{Route, Source};
 use crate::framework::{MACSystem, RoutingSystem};
-use crate::util::{seqno_less_than, sum_inf};
-
-// pub enum ScheduledType<'system, T : RoutingSystem> {
-//     RouteGC(&'system Source<T>)
-// }
-// 
-// pub struct Scheduled<'system, T: RoutingSystem>{
-//     pub time: Reverse<Instant>,
-//     pub scheduled: ScheduledType<'system, T>
-// }
-// 
-// impl<'system, T: RoutingSystem> PartialEq<Self> for Scheduled<'system, T> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.time == other.time
-//     }
-// }
-// 
-// impl<'system, T: RoutingSystem> PartialOrd for Scheduled<'system, T>{
-//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-//         self.time.partial_cmp(&other.time)
-//     }
-// }
-// 
-// impl<'system, T: RoutingSystem> Eq for Scheduled<'system, T> {
-// }
-// impl<'system, T: RoutingSystem> Ord for Scheduled<'system, T>{
-//     fn cmp(&self, other: &Self) -> Ordering {
-//         self.time.cmp(&other.time)
-//     }
-// }
+use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
 
 pub const INF: u16 = 0xFFFF;
 
 pub struct Router<T : RoutingSystem> {
     pub interfaces: HashMap<T::InterfaceId, Interface<T>>,
+    /// Source, Route
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
-    /// a set of nodes to broadcast updates for
-    pub broadcast_update: HashSet<T::NodeAddress>,
-    /// history of broadcast updates
-    pub dedup_update: HashMap<T::NodeAddress, u16>,
-    pub dedup_seqno_request: HashMap<T::NodeAddress, Instant>,
+    pub seqno_requests: HashMap<T::NodeAddress, u16>
 }
 
 impl<T: RoutingSystem> Router<T>{
@@ -58,9 +29,7 @@ impl<T: RoutingSystem> Router<T>{
             interfaces: HashMap::new(),
             routes: HashMap::new(),
             address,
-            dedup_update: HashMap::new(),
-            broadcast_update: HashSet::new(),
-            dedup_seqno_request: HashMap::new()
+            seqno_requests: HashMap::new()
         }
     }
     
@@ -94,7 +63,7 @@ impl<T: RoutingSystem> Router<T>{
             fd: None,
             metric: 0,
             next_hop: None,
-            source: T::MAC::sign((self.address.clone(), seqno), self)
+            source: T::MAC::sign(Source{addr: self.address.clone(), seqno}, self)
         }
     }
     
@@ -109,7 +78,7 @@ impl<T: RoutingSystem> Router<T>{
                         continue; // ok, the net address didn't change
                     }
                     // the address changed!!!
-                    trace!("Network addr of neighbour {addr} changed from {} to {phy}", val.addr_phy);
+                    trace!("Network addr of neighbour {} changed from {} to {}", json!(addr), json!(val.addr_phy), json!(phy));
                     itf.neighbours.remove(&addr); // we need to replace this!
                     // remove any routes containing the neighbour
                     self.routes.retain(|r_addr, route| {
@@ -135,20 +104,37 @@ impl<T: RoutingSystem> Router<T>{
     
     // region Route Selection
 
-    fn is_feasible(selected_route: &Route<T>, new_route: &Route<T>, new_neighbour: T::NodeAddress, metric: u16) -> Option<u16>{
-        if let Some(nh) = &selected_route.next_hop{
-            if metric == INF && *nh == new_neighbour{
-                return Some(INF);
+    pub fn solve_starvation(&mut self) -> Vec<T::MAC<Packet<T>>> {
+        let mut packets = Vec::new();
+        for (addr, route) in &self.routes{
+            // check if starved
+            if route.metric == INF {
+                // starved
+                let cur_seqno = self.get_seqno_for(addr);
+                if let Some(seqno) = cur_seqno{
+                    let nseqno = increment_by(seqno, 1);
+                    packets.push(
+                        T::MAC::sign(Packet::SeqnoRequest {
+                            source: addr.clone(),
+                            seqno: nseqno // want to increment this at least one
+                        }, self)
+                    );
+                    self.seqno_requests.insert(addr.clone(), nseqno);
+                }
             }
         }
+        packets
+    }
+    
+    fn is_feasible(selected_route: &Route<T>, new_route: &Route<T>, metric: u16) -> Option<u16>{
         if let Some(fd) = selected_route.fd{
-            let (_, s_seqno) = selected_route.source.data();
-            let (_, n_seqno) = new_route.source.data();
-            if seqno_less_than(*n_seqno, *s_seqno){
+            let s = selected_route.source.data().seqno;
+            let n = new_route.source.data().seqno;
+            if seqno_less_than(n, s){
                 return None;
             }
             if 
-                metric < fd || seqno_less_than(*s_seqno, *n_seqno)
+                metric < fd || seqno_less_than(s, n)
                 || (metric == fd && selected_route.metric == INF) // we want to restore the route if it was down
             {
                 return Some(metric);
@@ -164,7 +150,7 @@ impl<T: RoutingSystem> Router<T>{
             if let Some(nh) = &route.next_hop{
                 if let Some(itf) = &route.itf{ // this should always be true if the next hop exists
                     if let Some(x) = self.interfaces.get(itf){
-                        if let None = x.neighbours.get(nh) {
+                        if !x.neighbours.contains_key(nh) {
                             // disconnected route, should retract
                             route.metric = INF;
                         }
@@ -186,7 +172,7 @@ impl<T: RoutingSystem> Router<T>{
 
                     // update route table if there are better entries
                     if let Some(table_route) = entry{
-                        if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, n_addr.clone(), metric){
+                        if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric){
                             // we have a better route!
                             // or a route has been retracted
                             table_route.next_hop = Some(neigh.addr.clone());
@@ -241,52 +227,134 @@ impl<T: RoutingSystem> Router<T>{
             routes: vec
         }, self)
     }
-    pub fn handle_packet(&mut self, data: &T::MAC<Packet<T>>, itf: &T::InterfaceId, neigh: &T::NodeAddress){
-        if !data.validate(&neigh) {
-            error!("Rejected packet from {}, invalid neighbour MAC. Is there a MITM attack?", neigh);
-            return;
+
+    /// Creates a seqno packet using the data we already have
+    fn create_seqno_packet(&self, addr: &T::NodeAddress)  -> Option<T::MAC<Packet<T>>>{
+        if let Some(route) = self.routes.get(addr){
+            return Some(
+                T::MAC::sign(Packet::SeqnoUpdate(
+                    RouteUpdate{
+                        source: route.source.clone(),
+                        metric: route.metric
+                    }
+                ), self)
+            )
+        }
+        None
+    }
+    
+    /// handle a single packet. if there is a response, it should be broadcast to ALL neighbours
+    pub fn handle_packet(&mut self, data: &T::MAC<Packet<T>>, itf: &T::InterfaceId, neigh: &T::NodeAddress) -> Option<T::MAC<Packet<T>>>{
+        if !data.validate(neigh) {
+            error!("Rejected packet from {}, invalid neighbour MAC. Is there a MITM attack?", json!(neigh));
+            return None;
         }
 
+        // if exists, contains the address we should broadcast
+        let mut broadcast_seqno_for: Option<T::NodeAddress> = None;
+        
         match data.data() {
-            Packet::RouteUpdate(route) => {
-                self.handle_neighbour_route_update(route, itf, neigh, true);
+            Packet::SeqnoUpdate(route) => {
+                if self.handle_neighbour_route_update(route, itf, neigh) {
+                    // lets rebroadcast this change, our seqno has increased!
+                    broadcast_seqno_for = Some(route.source.data().addr.clone());
+                }
             }
             Packet::BatchRouteUpdate { routes } => {
                 for route in routes {
-                    self.handle_neighbour_route_update(route, itf, neigh, false);
+                    self.handle_neighbour_route_update(route, itf, neigh);
                 }
             }
-            Packet::RouteRequest { source, dedup } => {
+            Packet::SeqnoRequest { source, seqno } => {
+                // if we are the node in question, we can simply increment our seqno and send it!
+                println!("[dbg] got seqno req req_seqno={}, node={}", json!(seqno), json!(self.address));
+                if self.address == *source{
+                    println!("[dbg] got matched seqno req req_seqno={}, node={}", json!(seqno), json!(self.address));
+                    let cur_seqno = self.get_seqno_for(source);
+                    if let Some(seqno) = cur_seqno{
+                        let new_source = T::MAC::sign(
+                            Source{
+                                addr: source.clone(),
+                                seqno
+                            }, self
+                        );
 
+                        println!("[dbg] cur_seqno={seqno}, new_seqno={}", new_source.data().seqno);
+                        
+                        self.routes.entry(source.clone()).and_modify(|route| {
+                            route.source = new_source
+                        });
+
+                        broadcast_seqno_for = Some(source.clone());
+                    }
+                }
+                
+                if let Some(cur_seqno) = self.get_seqno_for(source){
+                    if seqno_less_than(*seqno, cur_seqno) || cur_seqno == *seqno {
+                        // TODO: Potentially only respond to the requester, may reduce the network traffic marginally, though may increase convergence time in higher packet loss environments
+                        
+                        // we have a higher or equal seqno, yay! we can broadcast our current seqno.
+                        broadcast_seqno_for = Some(source.clone());
+                    }
+                    else{
+                        let req_seqno = self.seqno_requests.entry(source.clone()).or_insert(0);
+                        // prevent duplication and infinite amplification... :skull:
+                        if seqno_less_than(*req_seqno, *seqno){
+                            println!("[dbg] re-requesting seqno src={}, cur_seqno={cur_seqno}, node={}", json!(source), json!(self.address));
+                            // sadge, we need to request for seqno too
+                            *req_seqno = *seqno; // make sure we dont ask for this seqno again
+                            return Some(
+                                T::MAC::sign(Packet::SeqnoRequest {
+                                    source: source.clone(),
+                                    seqno: *seqno
+                                }, self)
+                            )
+                        }
+                        
+                    }
+                }
             }
         }
+        if let Some(source) = broadcast_seqno_for {
+            // we broadcast our saved seqno for this source
+            println!("[dbg] Broadcasting Seqno");
+            return self.create_seqno_packet(&source)
+        }
+        None
+    }
+    
+    pub fn get_seqno_for(&self, addr: &T::NodeAddress) -> Option<u16> {
+        if let Some(x) = self.routes.get(addr){
+            let data = x.source.data();
+            return Some(data.seqno)
+        }
+        None
     }
 
-    fn handle_neighbour_route_update(&mut self, update: &RouteUpdate<T>, itf: &T::InterfaceId, neigh: &T::NodeAddress, mut broadcast: bool){
-        let (src_addr, seqno) = update.source.data();
+    /// handles neighbour route updates, returns true if seqno is incremented
+    fn handle_neighbour_route_update(&mut self, update: &RouteUpdate<T>, itf: &T::InterfaceId, neigh: &T::NodeAddress) -> bool{
+        let Source{addr, seqno} = update.source.data();
 
         // validate update
-        if !update.source.validate(src_addr) {
-            error!("Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?", src_addr, neigh);
-            return;
+        if !update.source.validate(addr) {
+            error!("Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?", json!(addr), json!(neigh));
+            return false;
         }
 
-        // deduplicate the request
-        if let Some(d_seqno) = self.dedup_update.get(src_addr){
-            if seqno_less_than(*seqno, *d_seqno) || d_seqno == seqno{
-                // duplicate, do not re-broadcast
-                broadcast = false;
+        let mut seqno_change = false;
+        let stored_seqno = self.get_seqno_for(addr);
+        if let Some(d_seqno) = stored_seqno{
+            if seqno_less_than(*seqno, d_seqno){
+                return false; // our neighbour is probably out of date. seqno cannot decrease
+            }
+            else if seqno_less_than(d_seqno, *seqno){
+                seqno_change = true;
             }
         }
-
-        if broadcast && self.get_neighbour(itf, neigh).is_some(){
-            self.dedup_update.insert(src_addr.clone(), *seqno);
-            self.broadcast_update.insert(src_addr.clone());
-        }
-
+        
         if let Some(neighbour) = self.get_neighbour_mut(itf, neigh) {
             // update the value
-            if let Some(entry) = neighbour.routes.get_mut(src_addr) {
+            if let Some(entry) = neighbour.routes.get_mut(addr) {
                 entry.source = update.source.clone();
                 entry.metric = update.metric;
             }
@@ -298,9 +366,10 @@ impl<T: RoutingSystem> Router<T>{
                     fd: None,
                     next_hop: None
                 };
-                neighbour.routes.insert(src_addr.clone(), route);
+                neighbour.routes.insert(addr.clone(), route);
             }
         }
+        seqno_change
     }
 
 
@@ -319,20 +388,5 @@ impl<T: RoutingSystem> Router<T>{
             }
         }
         None
-    }
-
-    /// Call this function frequently
-    pub fn cleanup(&mut self) -> Instant{
-        let now = Instant::now();
-        let mut next = now + T::config().cleanup_timer;
-
-        // cleanup dedup
-        let ttl = T::config().dedup_ttl;
-        self.dedup_seqno_request.retain(|_, &mut v| {
-            next = min(next, v);
-            v + ttl < now
-        });
-
-        next
     }
 }

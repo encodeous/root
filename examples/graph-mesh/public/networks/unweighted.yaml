@@ -3,15 +3,15 @@ config:
   update_routes: true # should node calculate routes based on what their neighbour has sent them
   refresh_interfaces: true # should we scan our interfaces for changes, i.e disconnect & metric change?
 routes:
-  1:
+  '1':
     - 1 - 0 self # a route to self is needed, since we need to broadcast ourselves to others
-  2:
+  '2':
     - 2 - 0 self
-  3:
+  '3':
     - 3 - 0 self
-  4:
+  '4':
     - 4 - 0 self
-  5:
+  '5':
     - 5 - 0 self
 neighbours:
   - 1 2 1
@@ -22,13 +22,18 @@ neighbours:
   - 3 5 1
   - 4 5 1
 nodes:
-  1:
+  '1':
     packets: []
-  2:
+    seqno-requests: []
+  '2':
     packets: []
-  3:
+    seqno-requests: []
+  '3':
     packets: []
-  4:
+    seqno-requests: []
+  '4':
     packets: []
-  5:
+    seqno-requests: []
+  '5':
     packets: []
+    seqno-requests: []
