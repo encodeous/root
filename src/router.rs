@@ -10,6 +10,7 @@ use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
 use crate::concepts::route::{Route, Source};
 use crate::framework::{MACSystem, RoutingSystem};
+use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
 use crate::util::{increment_by, seqno_less_than, sum_inf};
 
 pub const INF: u16 = 0xFFFF;
@@ -20,8 +21,15 @@ pub struct Router<T: RoutingSystem> {
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
     pub seqno_requests: HashMap<T::NodeAddress, u16>,
-    pub broadcast_seqno_for: HashSet<T::NodeAddress>,
+    pub broadcast_route_for: HashSet<T::NodeAddress>,
     pub outbound_packets: Vec<OutboundPacket<T>>,
+}
+
+#[derive(Eq, PartialEq)]
+enum UpdateAction {
+    SeqnoUpdate,
+    Retraction,
+    NoAction
 }
 
 impl<T: RoutingSystem> Router<T> {
@@ -31,7 +39,7 @@ impl<T: RoutingSystem> Router<T> {
             routes: HashMap::new(),
             address,
             seqno_requests: HashMap::new(),
-            broadcast_seqno_for: HashSet::new(),
+            broadcast_route_for: HashSet::new(),
             outbound_packets: Vec::new(),
         }
     }
@@ -89,7 +97,7 @@ impl<T: RoutingSystem> Router<T> {
     pub fn refresh_interfaces(&mut self) {
         for (id, itf) in &mut self.interfaces {
             // pull data from network interfaces
-            itf.neighbours.retain(|_, v| itf.net_if.get_cost(&v.addr_phy) != INF);
+            // itf.neighbours.retain(|_, v| itf.net_if.get_cost(&v.addr_phy) != INF); -- prob shouldnt do this
             for (phy, addr) in itf.net_if.get_neighbours() {
                 if let Some(val) = itf.neighbours.get_mut(&addr) {
                     if val.addr_phy == phy {
@@ -165,6 +173,7 @@ impl<T: RoutingSystem> Router<T> {
     /// Recalculate routes based on current data
     pub fn update_routes(&mut self) {
         // handle route retractions
+        let mut retractions = Vec::new();
         for (addr, route) in &mut self.routes {
             if let Some(nh) = &route.next_hop {
                 if let Some(itf) = &route.itf { // this should always be true if the next hop exists
@@ -172,6 +181,7 @@ impl<T: RoutingSystem> Router<T> {
                         if !x.neighbours.contains_key(nh) {
                             // disconnected route, should retract
                             route.metric = INF;
+                            retractions.push(route.source.clone());
                         }
                     }
                 }
@@ -181,16 +191,13 @@ impl<T: RoutingSystem> Router<T> {
             for (n_addr, neigh) in &itf.neighbours {
                 let cost = itf.net_if.get_cost(&neigh.addr_phy);
 
-                if cost == INF {
-                    println!("Retracted");
-                }
-
                 for (src, neigh_route) in &neigh.routes {
                     let metric = sum_inf(cost, neigh_route.metric);
                     let entry = self.routes.get_mut(src);
 
-                    // update route table if there are better entries
+                    // if the table has the route
                     if let Some(table_route) = entry {
+                        // update route table if the entry is better
                         if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric) {
                             // we have a better route!
                             // or a route has been retracted
@@ -199,13 +206,16 @@ impl<T: RoutingSystem> Router<T> {
                             table_route.source = neigh_route.source.clone();
                             table_route.fd = Some(new_fd);
                             table_route.itf = Some(id.clone());
-                        } else if let Some(nh) = &table_route.next_hop {
+                        }
+                        else if let Some(nh) = &table_route.next_hop {
+                            // this is a selected route, we should update this regardless.
                             if nh == n_addr {
                                 // update route metric
                                 if let Some(fd) = table_route.fd {
                                     if metric > fd {
-                                        // infeasible route
+                                        // infeasible route, we should retract this
                                         table_route.metric = INF;
+                                        retractions.push(table_route.source.clone());
                                     } else {
                                         // same or better route
                                         table_route.metric = metric;
@@ -215,7 +225,7 @@ impl<T: RoutingSystem> Router<T> {
                             }
                         }
                     } else {
-                        // selected
+                        // create the new route
                         let mut n_route = neigh_route.clone();
                         n_route.next_hop = Some(neigh.addr.clone());
                         n_route.metric = metric;
@@ -226,6 +236,10 @@ impl<T: RoutingSystem> Router<T> {
                     }
                 }
             }
+        }
+        
+        for retract in retractions{
+            self.write_retraction_for(retract);
         }
     }
     // endregion
@@ -247,20 +261,20 @@ impl<T: RoutingSystem> Router<T> {
     }
     /// you should call this after calling update routes, otherwise the seqno metrics published is not the best...
     pub fn broadcast_seqno_updates(&mut self) {
-        let tmp_seqno = self.broadcast_seqno_for.clone();
+        let tmp_seqno = self.broadcast_route_for.clone();
         for source in tmp_seqno{
             if let Some(pkt) = self.create_seqno_packet(&source){
                 self.write_broadcast_packet(&pkt);
             }
         }
-        self.broadcast_seqno_for.clear();
+        self.broadcast_route_for.clear();
     }
 
     /// Creates a seqno packet using the data we already have
     fn create_seqno_packet(&self, addr: &T::NodeAddress) -> Option<T::MAC<Packet<T>>> {
         if let Some(route) = self.routes.get(addr) {
             return Some(
-                T::MAC::sign(Packet::SeqnoUpdate(
+                T::MAC::sign(Packet::UrgentRouteUpdate(
                     RouteUpdate {
                         source: route.source.clone(),
                         metric: route.metric,
@@ -271,6 +285,18 @@ impl<T: RoutingSystem> Router<T> {
         None
     }
 
+    /// broadcasts a retraction for a specific source, to all neighbours
+    fn write_retraction_for(&mut self, source: T::MAC<Source<T>>){
+        self.write_broadcast_packet(&T::MAC::sign(
+            Packet::UrgentRouteUpdate(
+                RouteUpdate{
+                    source,
+                    metric: INF
+                }
+            ), self
+        ))
+    }
+    
     /// handle a single packet. if there is a response, it should be broadcast to ALL neighbours
     pub fn handle_packet(&mut self, data: &T::MAC<Packet<T>>, itf: &T::InterfaceId, neigh: &T::NodeAddress) {
         if !data.validate(neigh) {
@@ -283,11 +309,18 @@ impl<T: RoutingSystem> Router<T> {
 
 
         match data.data() {
-            Packet::SeqnoUpdate(route) => {
+            Packet::UrgentRouteUpdate(route) => {
                 // println!("[dbg] {} got packet {} from {}", json!(self.address), json!(data), json!(neigh));
-                if self.handle_neighbour_route_update(route, itf, neigh) {
-                    // lets rebroadcast this change, our seqno has increased!
-                    self.broadcast_seqno_for.insert(route.source.data().addr.clone());
+                match self.handle_neighbour_route_update(route, itf, neigh)  {
+                    SeqnoUpdate => {
+                        // lets rebroadcast this change, our seqno has increased!
+                        self.broadcast_route_for.insert(route.source.data().addr.clone());
+                    }
+                    Retraction => {
+                        // broadcast this retraction
+                        self.write_retraction_for(route.source.clone());
+                    }
+                    NoAction => {}
                 }
             }
             Packet::BatchRouteUpdate { routes } => {
@@ -306,7 +339,7 @@ impl<T: RoutingSystem> Router<T> {
                         // TODO: Potentially only respond to the requester, may reduce the network traffic marginally, though may increase convergence time in higher packet loss environments
 
                         // we have a higher or equal seqno, yay! we can broadcast our current seqno.
-                        self.broadcast_seqno_for.insert(source.clone());
+                        self.broadcast_route_for.insert(source.clone());
                     } else if self.address == *source {
                         // println!("[dbg] got matched seqno req req_seqno={}, node={}", json!(seqno), json!(self.address));
                         let new_source = T::MAC::sign(
@@ -322,7 +355,7 @@ impl<T: RoutingSystem> Router<T> {
                             route.source = new_source
                         });
 
-                        self.broadcast_seqno_for.insert(source.clone());
+                        self.broadcast_route_for.insert(source.clone());
                     } else {
                         let req_seqno = self.seqno_requests.entry(source.clone()).or_insert(0);
                         // prevent duplication and infinite amplification... :skull:
@@ -352,24 +385,24 @@ impl<T: RoutingSystem> Router<T> {
         }
         None
     }
-
+    
     /// handles neighbour route updates, returns true if seqno is incremented
-    fn handle_neighbour_route_update(&mut self, update: &RouteUpdate<T>, itf: &T::InterfaceId, neigh: &T::NodeAddress) -> bool {
+    fn handle_neighbour_route_update(&mut self, update: &RouteUpdate<T>, itf: &T::InterfaceId, neigh: &T::NodeAddress) -> UpdateAction {
         let Source { addr, seqno } = update.source.data();
 
         // validate update
         if !update.source.validate(addr) {
             error!("Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?", json!(addr), json!(neigh));
-            return false;
+            return NoAction;
         }
 
-        let mut seqno_change = false;
+        let mut action = NoAction;
         let stored_seqno = self.get_seqno_for(addr);
         if let Some(d_seqno) = stored_seqno {
             if seqno_less_than(*seqno, d_seqno) {
-                return false; // our neighbour is probably out of date. seqno cannot decrease
+                return NoAction; // our neighbour is probably out of date. seqno cannot decrease
             } else if seqno_less_than(d_seqno, *seqno) {
-                seqno_change = true;
+                action = SeqnoUpdate;
             }
         }
 
@@ -388,8 +421,16 @@ impl<T: RoutingSystem> Router<T> {
                 };
                 neighbour.routes.insert(addr.clone(), route);
             }
+
+            if update.metric == INF {
+                // this is a retraction!
+                if action != NoAction{
+                    error!("Unexpected state: A seqno increase should not have a metric of INF!")
+                }
+                action = Retraction;
+            }
         }
-        seqno_change
+        action
     }
 
 

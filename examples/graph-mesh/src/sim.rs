@@ -45,7 +45,7 @@ pub fn tick_state(state: &mut State){
         // push all outgoing packets from handling packets
 
         for packet in node.router.outbound_packets.drain(..){
-            println!("[dbg] OP {} -> {}: {}", node.router.address, packet.addr_phy, json!(packet.packet));
+            // println!("[dbg] OP {} -> {}: {}", node.router.address, packet.addr_phy, json!(packet.packet));
             if let PAddr::GraphNode(d_node) = packet.addr_phy{
                 let values = state.packets.entry(d_node).or_default();
                 values.push((packet.packet, node.router.address))

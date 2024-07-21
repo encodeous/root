@@ -6,7 +6,7 @@ use crate::framework::{RoutingSystem};
 #[serde(bound = "")]
 pub enum Packet<T: RoutingSystem> {
     /// this is a single, unscheduled update that should be sent immediately.
-    SeqnoUpdate(RouteUpdate<T>),
+    UrgentRouteUpdate(RouteUpdate<T>),
     /// this is a batch, full-table update that should only be sent periodically to all nodes
     BatchRouteUpdate {
         routes: Vec<RouteUpdate<T>>

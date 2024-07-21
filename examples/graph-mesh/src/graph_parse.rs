@@ -137,12 +137,13 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
             for (k, v) in mp {
                 let p_type = k.as_str().context("Expected string key")?;
                 match p_type {
-                    "sequ" => {
+                    // r == w, as we all know.
+                    "uwu" => {
                         let values = packets.entry(addr).or_default();
                         values.push(
                             (
                                 DummyMAC{
-                                    data: Packet::SeqnoUpdate(
+                                    data: Packet::UrgentRouteUpdate(
                                         parse_update(v)?
                                     )
                                 },
@@ -329,9 +330,9 @@ pub fn save(state: &State) -> Yaml {
                 Yaml::String(from.to_string()),
             );
             match &pkt.data {
-                Packet::SeqnoUpdate(update) => {
+                Packet::UrgentRouteUpdate(update) => {
                     pkt_map.insert(
-                        Yaml::from_str("sequ"),
+                        Yaml::from_str("uwu"),
                         serialize_update(update),
                     );
                 }
