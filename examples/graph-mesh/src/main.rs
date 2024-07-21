@@ -40,12 +40,12 @@ struct GraphSystem{
 
 impl Clone for GraphSystem{
     fn clone(&self) -> Self {
-        todo!() // don't actually need to clone, rust's type system is too strict
+        todo!() // don't actually need to clone, rust's type system is too strict lol
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Serialize, Deserialize)]
-enum PAddr {
+#[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
+pub enum PAddr {
     GraphNode(u8)
 }
 

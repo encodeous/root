@@ -1,5 +1,6 @@
 config:
-  broadcast_updates: true # should nodes send updates to each other
+  broadcast_routes: true # should nodes send updates to each other
+  broadcast_seqno: true # should nodes broadcast their saved seqno when another node requests for it?
   update_routes: true # should node calculate routes based on what their neighbour has sent them
   refresh_interfaces: true # should we scan our interfaces for changes, i.e disconnect & metric change?
 routes:

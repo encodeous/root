@@ -18,6 +18,8 @@ pub struct Graph {
 
 pub struct State {
     pub nodes: Vec<GraphSystem>,
+    
+    /// map of [Dest, Vec<Packet, From>]
     pub packets: BTreeMap<u8, Vec<(DummyMAC<Packet<GraphSystem>>, u8)>>,
     pub config: BTreeMap<String, bool>,
     pub seq_requests: Vec<u8>
