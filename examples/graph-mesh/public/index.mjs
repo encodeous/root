@@ -351,13 +351,15 @@ export function recalcGraph(data) {
     }
 
     // cy.centre()
-    let options = {
-        name: 'cola',
-        ...defaults
-    };
+    if(!window.cola){
+        let options = {
+            name: 'cola',
+            ...defaults
+        };
 
-    let layout = cy.layout(options);
-    layout.run()
+        window.cola = cy.layout(options);
+        window.cola.run()
+    }
 }
 
 export async function runSim(text) {
