@@ -1,3 +1,23 @@
+use crate::graph_parse::{load, save, State};
+use crate::sim::tick_state;
+use crate::NType::GraphT1;
+use crate::PAddr::GraphNode;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Empty, Full};
+use hyper::body::Bytes;
+use hyper::http::HeaderValue;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_staticfile::Static;
+use hyper_util::rt::TokioIo;
+use mime_guess::Mime;
+use root::concepts::interface::{AddressType, NetworkInterface};
+use root::concepts::packet::Packet;
+use root::framework::{MACSystem, RoutingSystem};
+use root::router::{Router, INF};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::io;
@@ -6,39 +26,19 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
-use http_body_util::{BodyExt, Empty, Full};
-use http_body_util::combinators::BoxBody;
-use hyper::{Method, Request, Response, StatusCode};
-use hyper::body::Bytes;
-use hyper::http::HeaderValue;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_staticfile::Static;
-use hyper_util::rt::TokioIo;
-use mime_guess::Mime;
-use root::concepts::interface::{AddressType, NetworkInterface};
-use root::framework::{MACSystem, RoutingSystem};
-use root::router::{INF, Router};
-use serde::{Deserialize, Serialize};
-use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
-use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 use yaml_rust2::yaml::Hash;
-use root::concepts::packet::Packet;
-use crate::graph_parse::{load, save, State};
-use crate::PAddr::GraphNode;
-use crate::NType::GraphT1;
-use crate::sim::tick_state;
+use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
 
 mod graph_parse;
-mod vis;
 mod sim;
+mod vis;
 
-struct GraphSystem{
-    router: Router<Self>
+struct GraphSystem {
+    router: Router<Self>,
 }
 
-impl Clone for GraphSystem{
+impl Clone for GraphSystem {
     fn clone(&self) -> Self {
         todo!() // don't actually need to clone, rust's type system is too strict lol
     }
@@ -46,36 +46,33 @@ impl Clone for GraphSystem{
 
 #[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
 pub enum PAddr {
-    GraphNode(u8)
+    GraphNode(u8),
 }
 
 #[derive(Eq, PartialEq, Hash)]
 enum NType {
-    GraphT1
+    GraphT1,
 }
 
 impl AddressType<GraphSystem> for PAddr {
     fn get_network_type(&self) -> NType {
         match self {
-            PAddr::GraphNode(_) => {
-                GraphT1
-            }
+            PAddr::GraphNode(_) => GraphT1,
         }
     }
 }
 
-impl Display for PAddr{
+impl Display for PAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let GraphNode(id) = self {
             write!(f, "{}", id)
-        }
-        else{
+        } else {
             write!(f, "Unknown Address Type")
         }
     }
 }
 
-impl RoutingSystem for GraphSystem{
+impl RoutingSystem for GraphSystem {
     type NodeAddress = u8;
     type PhysicalAddress = PAddr;
     type NetworkType = NType;
@@ -86,19 +83,21 @@ impl RoutingSystem for GraphSystem{
 
 #[derive(Serialize, Deserialize)]
 struct DummyMAC<T>
-where T: Clone{
-    pub data: T
+where
+    T: Clone,
+{
+    pub data: T,
 }
 
 impl<V: Clone> Clone for DummyMAC<V> {
     fn clone(&self) -> Self {
-        DummyMAC{
-            data: self.data.clone()
+        DummyMAC {
+            data: self.data.clone(),
         }
     }
 }
 
-impl<V: Clone + Serialize + DeserializeOwned> MACSystem<V, GraphSystem> for DummyMAC<V>{
+impl<V: Clone + Serialize + DeserializeOwned> MACSystem<V, GraphSystem> for DummyMAC<V> {
     fn data(&self) -> &V {
         &self.data
     }
@@ -112,19 +111,17 @@ impl<V: Clone + Serialize + DeserializeOwned> MACSystem<V, GraphSystem> for Dumm
     }
 
     fn sign(data: V, router: &Router<GraphSystem>) -> DummyMAC<V> {
-        DummyMAC::<V>{
-            data
-        }
+        DummyMAC::<V> { data }
     }
 }
 
 #[derive(Eq, PartialEq)]
 struct GraphInterface {
     neigh: HashMap<u8, u16>,
-    id: u8
+    id: u8,
 }
 
-impl NetworkInterface<GraphSystem> for GraphInterface{
+impl NetworkInterface<GraphSystem> for GraphInterface {
     fn address(&self) -> PAddr {
         GraphNode(self.id)
     }
@@ -138,15 +135,15 @@ impl NetworkInterface<GraphSystem> for GraphInterface{
     }
 
     fn get_cost(&self, addr: &PAddr) -> u16 {
-        if let GraphNode(id) = addr{
-            return self.neigh[id]
+        if let GraphNode(id) = addr {
+            return self.neigh[id];
         }
         INF
     }
 
     fn get_neighbours(&self) -> Vec<(PAddr, u8)> {
         let mut neighbours = Vec::new();
-        for (addr, cost) in &self.neigh{
+        for (addr, cost) in &self.neigh {
             neighbours.push((GraphNode(*addr), *addr))
         }
         neighbours
@@ -155,7 +152,7 @@ impl NetworkInterface<GraphSystem> for GraphInterface{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = SocketAddr::from(([0,0,0,0], 9999));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 9999));
 
     // We create a TcpListener and bind it to 127.0.0.1:3000
     let listener = TcpListener::bind(addr).await?;
@@ -184,55 +181,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn sim_route(
-    req: Request<hyper::body::Incoming>, static_: &Static
+    req: Request<hyper::body::Incoming>,
+    static_: &Static,
 ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>, anyhow::Error> {
     let path_str = req.uri().path().to_string();
     match (req.method(), path_str.as_str()) {
         (&Method::POST, "/sim_route") => {
             let body = req.collect().await?.to_bytes();
             let str = String::from_utf8(body.to_vec()).unwrap();
-            
+
             let yaml = YamlLoader::load_from_str(str.as_str());
-            
-            if let Err(err) = yaml{
+
+            if let Err(err) = yaml {
                 let mut r_err = Response::new(full("Invalid YAML"));
                 *r_err.status_mut() = StatusCode::BAD_REQUEST;
-                return Ok(
-                    r_err
-                )
+                return Ok(r_err);
             }
-            
+
             let mut state = load(&yaml.unwrap()[0]);
 
-            if let Err(err) = state{
+            if let Err(err) = state {
                 let mut r_err = Response::new(full(err.to_string()));
                 *r_err.status_mut() = StatusCode::BAD_REQUEST;
-                return Ok(
-                    r_err
-                )
+                return Ok(r_err);
             }
-            
+
             let gs = &mut state.unwrap();
-            
+
             tick_state(gs);
             let new_state = save(gs);
-            
+
             Ok(Response::new(full(yaml_to_str(&new_state))))
-        },
+        }
         (&Method::GET, path) => {
-            
-            let mut resp = Response::new(
-                full(static_.clone().serve(req).await?.collect().await?.to_bytes())
-            );
+            let mut resp = Response::new(full(
+                static_
+                    .clone()
+                    .serve(req)
+                    .await?
+                    .collect()
+                    .await?
+                    .to_bytes(),
+            ));
             let mime_type = mime_guess::from_path(path)
                 .first_or(Mime::from_str("text/html").unwrap())
                 .to_string();
-            
-            resp.headers_mut().insert("Content-Type", HeaderValue::from_str(mime_type.as_str())?);
-            Ok(
-                resp
-            )
-        },
+
+            resp.headers_mut()
+                .insert("Content-Type", HeaderValue::from_str(mime_type.as_str())?);
+            Ok(resp)
+        }
         // Return 404 Not Found for other routes.
         _ => {
             let mut not_found = Response::new(empty());
@@ -253,7 +251,7 @@ fn empty() -> BoxBody<Bytes, anyhow::Error> {
         .boxed()
 }
 
-fn yaml_to_str(yaml: &Yaml) -> String{
+fn yaml_to_str(yaml: &Yaml) -> String {
     let mut out = String::new();
     let mut yml = YamlEmitter::new(&mut out);
     yml.compact(true);

@@ -163,6 +163,7 @@ let curData = null;
 let selected = null;
 let highlighting = false;
 function highlight(){
+    if(!curData["routes"]) return;
     highlighting = true;
     for(let ele of cy.mutableElements()){
         if(ele.id() !== selected)
@@ -308,15 +309,22 @@ export function updateGraph(data){
 export function recalcGraph(data) {
     curData = data;
     let ids = new Set()
+    for (let edge of data["neighbours"]) {
+        let {a,b,c} = parseEdge(edge)
+        ids.add("n" + a);
+        ids.add("n" + b);
+    }
     for (let node in data["nodes"]) {
         let id = "n" + node;
         ids.add(id)
+    }
+    for(let id of ids){
         if (!cy.hasElementWithId(id)) {
             cy.add({
                 group: 'nodes',
                 data: {
                     id: id,
-                    label: node
+                    label: id.substring(1,2)
                 }
             })
         }

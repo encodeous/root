@@ -1,11 +1,11 @@
+use crate::concepts::neighbour::Neighbour;
+use crate::concepts::packet::Packet;
+use crate::framework::RoutingSystem;
+use crate::router::Router;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::Instant;
-use crate::concepts::neighbour::Neighbour;
-use crate::concepts::packet::Packet;
-use crate::framework::{RoutingSystem};
-use crate::router::Router;
 
 pub trait NetworkInterface<T: RoutingSystem> {
     /// Self address of the interface
@@ -27,9 +27,7 @@ pub trait AddressType<T: RoutingSystem> {
 /// 3.2.3. The Interface Table (Entry)
 pub struct Interface<T: RoutingSystem> {
     pub net_if: Box<dyn NetworkInterface<T>>,
-    pub neighbours: HashMap<T::NodeAddress, Box<Neighbour<T>>>
+    pub neighbours: HashMap<T::NodeAddress, Box<Neighbour<T>>>,
 }
 
-impl<T: RoutingSystem> Interface<T>{
-
-}
+impl<T: RoutingSystem> Interface<T> {}

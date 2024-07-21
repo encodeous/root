@@ -1,3 +1,8 @@
+use crate::concepts::interface::{AddressType, Interface, NetworkInterface};
+use crate::concepts::route::Route;
+use crate::framework::RoutingSystem;
+use crate::router::{Router, INF};
+use anyhow::{anyhow, Context, Result};
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::HashMap;
@@ -5,11 +10,6 @@ use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use crate::concepts::interface::{NetworkInterface, AddressType, Interface};
-use anyhow::{anyhow, Context, Result};
-use crate::concepts::route::{Route};
-use crate::framework::{RoutingSystem};
-use crate::router::{INF, Router};
 
 /// 3.2.4. The Neighbour Table
 pub struct Neighbour<T: RoutingSystem> {
@@ -21,19 +21,15 @@ pub struct Neighbour<T: RoutingSystem> {
     pub addr: T::NodeAddress,
     // pub hello_interval: Duration,
     // pub timer_last_ihu: Instant,
-    pub routes: HashMap<T::NodeAddress, Route<T>>
+    pub routes: HashMap<T::NodeAddress, Route<T>>,
 }
 
-impl <T: RoutingSystem> Neighbour<T>{
-    
-}
+impl<T: RoutingSystem> Neighbour<T> {}
 
-impl <T: RoutingSystem> PartialEq for Neighbour<T>{
+impl<T: RoutingSystem> PartialEq for Neighbour<T> {
     fn eq(&self, other: &Self) -> bool {
         // same neighbour if they share the same interface and network address
-        
-        self.itf == other.itf &&
-            self.addr_phy == other.addr_phy &&
-            self.addr == other.addr
+
+        self.itf == other.itf && self.addr_phy == other.addr_phy && self.addr == other.addr
     }
 }

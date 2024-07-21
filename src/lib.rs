@@ -12,8 +12,6 @@ trait Address {
     const MASK: usize;
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

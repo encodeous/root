@@ -1,8 +1,8 @@
+use crate::concepts::neighbour::Neighbour;
+use crate::framework::RoutingSystem;
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
-use serde::{Deserialize, Serialize};
-use crate::concepts::neighbour::Neighbour;
-use crate::framework::{RoutingSystem};
 
 /// 3.2.6. The Route Table
 #[derive(Clone, Serialize, Deserialize)]
@@ -16,11 +16,11 @@ pub struct Route<T: RoutingSystem> {
     /// the feasibility distance
     pub fd: Option<u16>,
     /// the next-hop address of this route, not sent to neighbours
-    pub next_hop: Option<T::NodeAddress>
+    pub next_hop: Option<T::NodeAddress>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Source<T: RoutingSystem>{
+pub struct Source<T: RoutingSystem> {
     pub addr: T::NodeAddress,
-    pub seqno: u16
+    pub seqno: u16,
 }
