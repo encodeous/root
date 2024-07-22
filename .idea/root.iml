@@ -3,11 +3,13 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/examples/graph-mesh/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
-      <excludeFolder url="file://$MODULE_DIR$/examples/graph-mesh/target" />
+      <sourceFolder url="file://$MODULE_DIR$/graph-mesh/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/root/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
-      <excludeFolder url="file://$MODULE_DIR$/examples/graph-mesh/root" />
+      <excludeFolder url="file://$MODULE_DIR$/graph-mesh/root" />
+      <excludeFolder url="file://$MODULE_DIR$/graph-mesh/target" />
+      <excludeFolder url="file://$MODULE_DIR$/root/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

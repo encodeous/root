@@ -20,6 +20,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
+use std::fs::File;
 use std::io;
 use std::io::{BufRead, Error};
 use std::net::SocketAddr;
@@ -29,12 +30,14 @@ use std::sync::Mutex;
 use tokio::net::TcpListener;
 use yaml_rust2::yaml::Hash;
 use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
+use log::error;
+use simplelog::*;
 
 mod graph_parse;
 mod sim;
 mod vis;
 
-struct GraphSystem {
+pub struct GraphSystem {
     router: Router<Self>,
 }
 
@@ -50,7 +53,7 @@ pub enum PAddr {
 }
 
 #[derive(Eq, PartialEq, Hash)]
-enum NType {
+pub enum NType {
     GraphT1,
 }
 
@@ -82,7 +85,7 @@ impl RoutingSystem for GraphSystem {
 }
 
 #[derive(Serialize, Deserialize)]
-struct DummyMAC<T>
+pub struct DummyMAC<T>
 where
     T: Clone,
 {
@@ -152,9 +155,20 @@ impl NetworkInterface<GraphSystem> for GraphInterface {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    CombinedLogger::init(
+        vec![
+            TermLogger::new(LevelFilter::Warn, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)
+        ]
+    ).unwrap();
+
+    if !Path::new("./public").exists(){
+        error!("Unable to find the ./public folder. Make sure to run the program in the correct directory.");
+        return Ok(());
+    }
+
+
     let addr = SocketAddr::from(([0, 0, 0, 0], 9999));
 
-    // We create a TcpListener and bind it to 127.0.0.1:3000
     let listener = TcpListener::bind(addr).await?;
 
     // We start a loop to continuously accept incoming connections
