@@ -102,37 +102,17 @@ impl<T: RoutingSystem> Router<T> {
     pub fn refresh_interfaces(&mut self) {
         for (id, itf) in &mut self.interfaces {
             // pull data from network interfaces
-            // itf.neighbours.retain(|_, v| itf.net_if.get_cost(&v.addr_phy) != INF); -- prob shouldnt do this
             for (phy, addr) in itf.net_if.get_neighbours() {
-                if let Some(val) = itf.neighbours.get_mut(&addr) {
-                    if val.addr_phy == phy {
-                        continue; // ok, the net address didn't change
-                    }
-                    // the address changed!!!
-                    trace!(
-                        "Network addr of neighbour {} changed from {} to {}",
-                        json!(addr),
-                        json!(val.addr_phy),
-                        json!(phy)
-                    );
-                    itf.neighbours.remove(&addr); // we need to replace this!
-                                                  // remove any routes containing the neighbour
-                    self.routes.retain(|r_addr, route| {
-                        if let Some(nh_addr) = &route.next_hop {
-                            if nh_addr == &addr {
-                                return false;
-                            }
-                        }
-                        true
-                    });
+                // add neighbours if they dont exist
+                if !itf.neighbours.contains_key(&addr){
+                    let neigh = Neighbour {
+                        itf: id.clone(),
+                        addr_phy: phy,
+                        addr: addr.clone(),
+                        routes: HashMap::new(),
+                    };
+                    itf.neighbours.insert(addr.clone(), Box::new(neigh));
                 }
-                let neigh = Neighbour {
-                    itf: id.clone(),
-                    addr_phy: phy,
-                    addr: addr.clone(),
-                    routes: HashMap::new(),
-                };
-                itf.neighbours.insert(addr.clone(), Box::new(neigh));
             }
         }
     }
@@ -171,10 +151,7 @@ impl<T: RoutingSystem> Router<T> {
             if seqno_less_than(n, s) {
                 return None;
             }
-            if metric < fd
-                || seqno_less_than(s, n)
-                || (metric == fd && selected_route.metric == INF)
-            // we want to restore the route if it was down
+            if metric < fd || seqno_less_than(s, n)
             {
                 return Some(metric);
             }
@@ -213,7 +190,6 @@ impl<T: RoutingSystem> Router<T> {
                         // update route table if the entry is better
                         if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric) {
                             // we have a better route!
-                            // or a route has been retracted
                             table_route.next_hop = Some(neigh.addr.clone());
                             table_route.metric = metric;
                             table_route.source = neigh_route.source.clone();
@@ -441,7 +417,15 @@ impl<T: RoutingSystem> Router<T> {
             if let Some(entry) = neighbour.routes.get_mut(addr) {
                 entry.source = update.source.clone();
                 entry.metric = update.metric;
-            } else {
+                if update.metric == INF && entry.metric != INF {
+                    // this is a retraction!
+                    if action != NoAction {
+                        error!("Unexpected state: A seqno increase should not have a metric of INF!")
+                    }
+                    action = Retraction;
+                }
+            } else if(update.metric != INF) {
+                // we add the route if it is not INF
                 let route = Route {
                     source: update.source.clone(),
                     metric: update.metric,
@@ -450,14 +434,6 @@ impl<T: RoutingSystem> Router<T> {
                     next_hop: None,
                 };
                 neighbour.routes.insert(addr.clone(), route);
-            }
-
-            if update.metric == INF {
-                // this is a retraction!
-                if action != NoAction {
-                    error!("Unexpected state: A seqno increase should not have a metric of INF!")
-                }
-                action = Retraction;
             }
         }
         action

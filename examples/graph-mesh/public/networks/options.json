@@ -3,6 +3,7 @@
         "default.yaml": "Simple Weighted Graph",
         "starvation.yaml": "Graph in Starvation",
         "unweighted.yaml": "Simple Unweghted Graph",
-        "loop.yaml": "Loop Avoidance"
+        "loop.yaml": "Loop Avoidance",
+        "fragile.yaml": "Fragile Network"
     }
 }

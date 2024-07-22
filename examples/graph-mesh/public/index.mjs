@@ -333,42 +333,44 @@ export function recalcGraph(data) {
         let {a,b,c} = parseEdge(edge)
         let id = "e" + orderedPair(a, b)
         ids.add(id)
-        if (!cy.hasElementWithId(id)) {
-            let {x,y} = orderedPairTuple(a,b);
-            cy.add({
-                group: 'edges',
-                data: {
-                    id: id,
-                    source: "n" + x,
-                    target: "n" + y,
-                    weight: c,
-                    color: "white"
-                }
-            })
+        let {x,y} = orderedPairTuple(a,b);
+        if (cy.hasElementWithId(id)) {
+            cy.getElementById(id).remove()
         }
-        else{
-            cy.getElementById(id).data("weight", c)
-        }
+        cy.add({
+            group: 'edges',
+            data: {
+                id: id,
+                source: "n" + x,
+                target: "n" + y,
+                weight: c,
+                color: "white"
+            }
+        })
     }
 
     for(let ele of cy.elements()){
         let id = ele.id()
         if(!ids.has(id)){
-            cy.remove(ele)
+            ele.remove()
         }
     }
 
     // cy.centre()
-    if(!window.cola){
-        let options = {
-            name: 'cola',
-            ...defaults
-        };
-
-        window.cola = cy.layout(options);
-        window.cola.run()
+    if(window.cola){
+        window.cola.stop();
+        window.cola.destroy()
     }
+    let options = {
+        name: 'cola',
+        ...defaults
+    };
+
+    window.cola = cy.layout(options);
+    window.cola.run()
 }
+
+
 
 export async function runSim(text) {
     const resp = await fetch("/sim_route", {

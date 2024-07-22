@@ -210,30 +210,24 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
             node_ids.insert(a);
             node_ids.insert(b);
         }
-
-        for node in node_ids {
+        
+        
+        // create the nodes
+        for node in &node_ids {
             let mut neigh = HashMap::<u8, u16>::new();
-            for entry in adj.iter().filter(|x| x.0 == node) {
+            for entry in adj.iter().filter(|x| x.0 == *node) {
                 neigh.insert(entry.1, entry.2);
             }
-            let itf = GraphInterface { neigh, id: node };
-
+            let itf = GraphInterface { neigh, id: *node };
             let mut sys = GraphSystem {
-                router: Router::new(node),
+                router: Router::new(*node),
             };
-
             sys.router.init();
             sys.router.add_interface(Box::new(itf));
-            sys.router.refresh_interfaces();
-
-            if seqno_requests.contains_key(&node) {
-                for (k, v) in &seqno_requests[&node] {
-                    sys.router.seqno_requests.insert(*k, *v);
-                }
-            }
             nodes.push(sys);
         }
 
+        // restore the nodes routes
         if root.get(&Yaml::from_str("routes")).is_some() {
             let routes = state["routes"].as_hash().context("Expected route table")?;
 
@@ -250,6 +244,19 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
                     node.router
                         .routes
                         .insert(route_parsed.source.data.addr, route_parsed);
+                }
+                
+            }
+        }
+
+        // create the nodes
+        for sys in &mut nodes{
+            let node = sys.router.address;
+            sys.router.refresh_interfaces();
+
+            if seqno_requests.contains_key(&node) {
+                for (k, v) in &seqno_requests[&node] {
+                    sys.router.seqno_requests.insert(*k, *v);
                 }
             }
         }

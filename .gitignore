@@ -21,3 +21,5 @@ Cargo.lock
 /examples/graph-mesh/root
 
 .DS_Store
+
+/examples/graph-mesh/graph-mesh
