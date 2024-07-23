@@ -152,6 +152,7 @@ impl<T: RoutingSystem> Router<T> {
                 return None;
             }
             if metric < fd || seqno_less_than(s, n)
+                || (metric == fd && selected_route.metric == INF) // TODO: Prove why this is valid, and doesnt cause issues...
             {
                 return Some(metric);
             }
@@ -411,6 +412,14 @@ impl<T: RoutingSystem> Router<T> {
                 action = SeqnoUpdate;
             }
         }
+        
+        // check if this route is the currently selected route
+        let mut selected = false;
+        if let Some(route) = self.routes.get(addr){
+            if let Some(nh) = &route.next_hop{
+                selected = nh == neigh;
+            }
+        }
 
         if let Some(neighbour) = self.get_neighbour_mut(itf, neigh) {
             // update the value
@@ -424,8 +433,8 @@ impl<T: RoutingSystem> Router<T> {
                     }
                     action = Retraction;
                 }
-            } else if(update.metric != INF) {
-                // we add the route if it is not INF
+            } else if update.metric != INF || selected {
+                // we add the route if it is not INF and it is not the next hop
                 let route = Route {
                     source: update.source.clone(),
                     metric: update.metric,
