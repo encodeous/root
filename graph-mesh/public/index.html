@@ -68,9 +68,11 @@
         } catch (ex) {
             console.error(ex)
         }
-        var queryParams = new URLSearchParams(window.location.search);
-        queryParams.set("graph", LZString.compressToBase64(window.mEditor.getValue()))
-        window.history.pushState(null, null, "?"+queryParams.toString());
+        if(window.mEditor.getValue() < 1000){
+            var queryParams = new URLSearchParams(window.location.search);
+            queryParams.set("graph", LZString.compressToBase64(window.mEditor.getValue()))
+            window.history.pushState(null, null, "?"+queryParams.toString());
+        }
     }
 
     const diagnosticsOptions = {

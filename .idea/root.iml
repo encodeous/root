@@ -6,6 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/graph-mesh/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/root/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/graph-gen/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/graph-mesh/root" />
       <excludeFolder url="file://$MODULE_DIR$/graph-mesh/target" />

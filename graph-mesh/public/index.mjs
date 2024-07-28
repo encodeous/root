@@ -177,7 +177,7 @@ function highlight(){
     }
     recalcGraph(curData)
     if(selected == null) return;
-    let nodeId = parseInt(selected.substring(1,2));
+    let nodeId = parseInt(selected.substring(1));
     console.log(nodeId)
     let feasible = new Set();
     let infeasible = new Set();
@@ -295,7 +295,7 @@ seqno.addEventListener('click', async () => {
         curData["actions"]["req"] = []
     }
     curData["actions"]["req"].push(
-        selected.substring(1,2)
+        selected.substring(1)
     )
     window.setEditorText(yaml.dump(curData))
 })
@@ -324,7 +324,7 @@ export function recalcGraph(data) {
                 group: 'nodes',
                 data: {
                     id: id,
-                    label: id.substring(1,2)
+                    label: id.substring(1)
                 }
             })
         }
