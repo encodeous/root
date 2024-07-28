@@ -12,7 +12,7 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
 use mime_guess::Mime;
-use root::concepts::interface::{AddressType, NetworkInterface};
+use root::concepts::interface::{NetworkInterface};
 use root::concepts::packet::Packet;
 use root::framework::{MACSystem, RoutingSystem};
 use root::router::{Router, INF};
@@ -55,14 +55,6 @@ pub enum PAddr {
 #[derive(Eq, PartialEq, Hash)]
 pub enum NType {
     GraphT1,
-}
-
-impl AddressType<GraphSystem> for PAddr {
-    fn get_network_type(&self) -> NType {
-        match self {
-            PAddr::GraphNode(_) => GraphT1,
-        }
-    }
 }
 
 impl Display for PAddr {

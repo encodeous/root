@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteTargetsManager">
+    <targets>
+      <target name="WSL - Ubuntu-main" type="wsl" uuid="4414c3f1-9457-4951-b57d-afcece0e2f2f">
+        <config>
+          <option name="distributionMsId" value="Ubuntu-main" />
+          <option name="projectRootOnTarget" value="{exitCode=0, timeout=false, cancelled=false, stdout=/tmp/tmp.nN1F7rqNpY&#10;, stderr=}/root" />
+        </config>
+        <ContributedStateBase type="RsLanguageRuntime">
+          <config>
+            <option name="cargoPath" value="/home/encodeous/.cargo/bin/cargo" />
+            <option name="cargoVersion" value="1.78.0 (54d8815d0 2024-03-26)" />
+            <option name="rustcPath" value="/home/encodeous/.cargo/bin/rustc" />
+          </config>
+        </ContributedStateBase>
+      </target>
+    </targets>
+  </component>
+</project>

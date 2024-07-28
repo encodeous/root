@@ -1,4 +1,3 @@
-use crate::concepts::interface::{AddressType, Interface, NetworkInterface};
 use crate::concepts::route::Route;
 use crate::framework::RoutingSystem;
 use crate::router::{Router, INF};

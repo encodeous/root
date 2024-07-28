@@ -1,4 +1,4 @@
-use crate::concepts::interface::{AddressType, Interface, NetworkInterface};
+use crate::concepts::interface::{Interface, NetworkInterface};
 use crate::concepts::packet::Packet;
 use crate::router::Router;
 use serde::de::DeserializeOwned;
@@ -34,7 +34,6 @@ pub trait RoutingSystem: Clone {
         + DeserializeOwned;
     /// Address of a node on the physical network, may not be globally unique, and may be overlapping
     type PhysicalAddress: Sized
-        + AddressType<Self>
         + Hash
         + Eq
         + PartialEq

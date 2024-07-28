@@ -335,22 +335,8 @@ impl<T: RoutingSystem> Router<T> {
                         // we have a higher or equal seqno, yay! we can broadcast our current seqno.
                         self.broadcast_route_for.insert(source.clone());
                     } else if self.address == *source {
-                        // println!("[dbg] got matched seqno req req_seqno={}, node={}", json!(seqno), json!(self.address));
-                        let new_source = T::MAC::sign(
-                            Source {
-                                addr: source.clone(),
-                                seqno: increment_by(cur_seqno, 1),
-                            },
-                            self,
-                        );
-
-                        // println!("[dbg] cur_seqno={seqno}, new_seqno={}", new_source.data().seqno);
-
-                        self.routes
-                            .entry(source.clone())
-                            .and_modify(|route| route.source = new_source);
-
-                        self.broadcast_route_for.insert(source.clone());
+                        // we are the intended recipient, so we can broadcast this!
+                        self.broadcast_inc_seqno();
                     } else {
                         let req_seqno = self.seqno_requests.entry(source.clone()).or_insert(0);
                         // prevent duplication and infinite amplification... :skull:
@@ -373,6 +359,26 @@ impl<T: RoutingSystem> Router<T> {
                     // println!("[dbg] ignoring request, we dont have seqno for requested {}", json!(source));
                 }
             }
+        }
+    }
+    
+    pub fn broadcast_inc_seqno(&mut self){
+        if let Some(seqno) = self.get_seqno_for(&self.address){
+            let new_source = T::MAC::sign(
+                Source {
+                    addr: self.address.clone(),
+                    seqno: increment_by(seqno, 1),
+                },
+                self,
+            );
+
+            // println!("[dbg] cur_seqno={seqno}, new_seqno={}", new_source.data().seqno);
+
+            self.routes
+                .entry(self.address.clone())
+                .and_modify(|route| route.source = new_source);
+
+            self.broadcast_route_for.insert(self.address.clone());
         }
     }
 

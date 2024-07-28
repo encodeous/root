@@ -20,10 +20,6 @@ pub trait NetworkInterface<T: RoutingSystem> {
     fn get_neighbours(&self) -> Vec<(T::PhysicalAddress, T::NodeAddress)>;
 }
 
-pub trait AddressType<T: RoutingSystem> {
-    fn get_network_type(&self) -> T::NetworkType;
-}
-
 /// 3.2.3. The Interface Table (Entry)
 pub struct Interface<T: RoutingSystem> {
     pub net_if: Box<dyn NetworkInterface<T>>,
