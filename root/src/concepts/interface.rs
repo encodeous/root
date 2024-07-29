@@ -1,29 +1,40 @@
 use crate::concepts::neighbour::Neighbour;
-use crate::concepts::packet::Packet;
 use crate::framework::RoutingSystem;
-use crate::router::Router;
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::time::Instant;
+use serde::{Deserialize, Serialize};
+use crate::router::INF;
 
-pub trait NetworkInterface<T: RoutingSystem> {
-    /// Self address of the interface
-    fn address(&self) -> T::PhysicalAddress;
-    fn address_type(&self) -> T::NetworkType;
-    // unique identifier for this interface
-    fn id(&self) -> T::InterfaceId;
-    /// Cost to reach an address, 0xFFFF for Infinity. Lower is better.
-    /// Calculate the link cost offline, this method should not perform I/O
-    /// Return INF if the link goes down
-    fn get_cost(&self, addr: &T::PhysicalAddress) -> u16;
-    fn get_neighbours(&self) -> Vec<(T::PhysicalAddress, T::NodeAddress)>;
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct Interface<T: RoutingSystem + ?Sized> {
+    pub id: T::InterfaceId,
+    pub net_type: T::NetworkType,
+    pub neighbours: HashMap<T::NodeAddress, Neighbour<T>>,
 }
 
-/// 3.2.3. The Interface Table (Entry)
-pub struct Interface<T: RoutingSystem> {
-    pub net_if: Box<dyn NetworkInterface<T>>,
-    pub neighbours: HashMap<T::NodeAddress, Box<Neighbour<T>>>,
+impl<T: RoutingSystem + ?Sized> Interface<T> {
+    fn new(id: T::InterfaceId, network_type: T::NetworkType) -> Self{
+        Interface{
+            net_type: network_type,
+            id,
+            neighbours: HashMap::new()
+        }
+    }
+    fn add_neighbour(&mut self, addr: &T::NodeAddress, phy: &T::PhysicalAddress) {
+        if !self.neighbours.contains_key(&addr){
+            self.neighbours.insert(addr.clone(), Neighbour{
+                itf: self.id.clone(),
+                addr_phy: phy.clone(),
+                addr: addr.clone(),
+                routes: HashMap::new(),
+                link_cost: INF
+            });
+        }
+    }
+    fn get_neighbour(&mut self, addr: &T::NodeAddress) -> Option<&mut Neighbour<T>>{
+        self.neighbours.get_mut(addr)
+    }
+    fn remove_neighbour(&mut self, addr: &T::NodeAddress){
+        self.neighbours.remove(addr);
+    }
 }
-
-impl<T: RoutingSystem> Interface<T> {}

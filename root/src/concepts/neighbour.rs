@@ -1,17 +1,13 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 use crate::concepts::route::Route;
 use crate::framework::RoutingSystem;
-use crate::router::{Router, INF};
-use anyhow::{anyhow, Context, Result};
-use std::cell::RefCell;
-use std::cmp::{max, min};
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::rc::Rc;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
-/// 3.2.4. The Neighbour Table
-pub struct Neighbour<T: RoutingSystem> {
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct Neighbour<T: RoutingSystem + ?Sized> {
     /// the physical interface where the neighbour resides
     pub itf: T::InterfaceId,
     /// the physical address of the neighbouring interface
@@ -21,11 +17,14 @@ pub struct Neighbour<T: RoutingSystem> {
     // pub hello_interval: Duration,
     // pub timer_last_ihu: Instant,
     pub routes: HashMap<T::NodeAddress, Route<T>>,
+    /// Direct Link-cost to this neighbour, 0xFFFF for Infinity. Lower is better.
+    /// INF if the link is down
+    pub link_cost: u16
 }
 
-impl<T: RoutingSystem> Neighbour<T> {}
+impl<T: RoutingSystem + ?Sized> Neighbour<T> {}
 
-impl<T: RoutingSystem> PartialEq for Neighbour<T> {
+impl<T: RoutingSystem + ?Sized> PartialEq for Neighbour<T> {
     fn eq(&self, other: &Self) -> bool {
         // same neighbour if they share the same interface and network address
 

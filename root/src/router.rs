@@ -1,4 +1,4 @@
-use crate::concepts::interface::{Interface, NetworkInterface};
+use crate::concepts::interface::{Interface};
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
 use crate::concepts::route::{Route, Source};
@@ -15,7 +15,9 @@ use std::time::Instant;
 
 pub const INF: u16 = 0xFFFF;
 
-pub struct Router<T: RoutingSystem> {
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct Router<T: RoutingSystem + ?Sized> {
     pub interfaces: HashMap<T::InterfaceId, Interface<T>>,
     /// Source, Route
     pub routes: HashMap<T::NodeAddress, Route<T>>,
@@ -34,30 +36,19 @@ enum UpdateAction {
 
 impl<T: RoutingSystem> Router<T> {
     pub fn new(address: T::NodeAddress) -> Self {
-        Self {
+        let mut data = Self{
             interfaces: HashMap::new(),
             routes: HashMap::new(),
             address,
             seqno_requests: HashMap::new(),
             broadcast_route_for: HashSet::new(),
             outbound_packets: Vec::new(),
-        }
+        };
+        data.routes.insert(data.address.clone(), data.make_self_route_for_seqno(0));
+        data
     }
 
     // region Interface
-    pub fn add_interface(&mut self, interface: Box<dyn NetworkInterface<T>>) {
-        for (id, itf) in &mut self.interfaces {
-            if *id == interface.id() {
-                // interface exists
-                return;
-            }
-        }
-        let n_itf = Interface {
-            net_if: interface,
-            neighbours: Default::default(),
-        };
-        self.interfaces.insert(n_itf.net_if.id(), n_itf);
-    }
     /// writes a packet to the outbound packet queue for all neighbours
     pub fn write_broadcast_packet(&mut self, packet: &T::MAC<Packet<T>>) {
         // send to all neighbours
@@ -70,16 +61,6 @@ impl<T: RoutingSystem> Router<T> {
                 });
             }
         }
-    }
-    pub fn remove_interface(&mut self, id: T::InterfaceId) {
-        self.interfaces.retain(|itf_id, _| *itf_id != id);
-    }
-
-    /// only call once
-    pub fn init(&mut self) {
-        // create a self route
-        self.routes
-            .insert(self.address.clone(), self.make_self_route_for_seqno(0));
     }
 
     fn make_self_route_for_seqno(&self, seqno: u16) -> Route<T> {
@@ -95,25 +76,6 @@ impl<T: RoutingSystem> Router<T> {
                 },
                 self,
             ),
-        }
-    }
-
-    /// Queries the physical network interfaces for neighbours
-    pub fn refresh_interfaces(&mut self) {
-        for (id, itf) in &mut self.interfaces {
-            // pull data from network interfaces
-            for (phy, addr) in itf.net_if.get_neighbours() {
-                // add neighbours if they dont exist
-                if !itf.neighbours.contains_key(&addr){
-                    let neigh = Neighbour {
-                        itf: id.clone(),
-                        addr_phy: phy,
-                        addr: addr.clone(),
-                        routes: HashMap::new(),
-                    };
-                    itf.neighbours.insert(addr.clone(), Box::new(neigh));
-                }
-            }
         }
     }
     // endregion
@@ -180,10 +142,8 @@ impl<T: RoutingSystem> Router<T> {
         }
         for (id, itf) in &mut self.interfaces {
             for (n_addr, neigh) in &itf.neighbours {
-                let cost = itf.net_if.get_cost(&neigh.addr_phy);
-
                 for (src, neigh_route) in &neigh.routes {
-                    let metric = sum_inf(cost, neigh_route.metric);
+                    let metric = sum_inf(neigh.link_cost, neigh_route.metric);
                     let entry = self.routes.get_mut(src);
 
                     // if the table has the route

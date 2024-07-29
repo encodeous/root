@@ -2,6 +2,7 @@ pub mod concepts;
 pub mod framework;
 pub mod router;
 pub mod util;
+mod error;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

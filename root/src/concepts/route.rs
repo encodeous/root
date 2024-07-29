@@ -1,12 +1,14 @@
-use crate::concepts::neighbour::Neighbour;
 use crate::framework::RoutingSystem;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
+use educe::Educe;
 
 /// 3.2.6. The Route Table
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Route<T: RoutingSystem> {
+#[derive(Serialize, Deserialize, Educe)]
+#[serde(bound = "")]
+#[educe(Clone(bound()))]
+pub struct Route<T: RoutingSystem + ?Sized> {
     /// the source and seqno for which this route is advertised
     pub source: T::MAC<Source<T>>,
     /// the interface that the neighbour is available on
@@ -19,8 +21,9 @@ pub struct Route<T: RoutingSystem> {
     pub next_hop: Option<T::NodeAddress>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Source<T: RoutingSystem> {
+#[derive(Serialize, Deserialize, Educe)]
+#[educe(Clone(bound()))]
+pub struct Source<T: RoutingSystem + ?Sized> {
     pub addr: T::NodeAddress,
     pub seqno: u16,
 }

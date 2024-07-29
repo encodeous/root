@@ -1,10 +1,12 @@
 use crate::concepts::route::Source;
 use crate::framework::RoutingSystem;
 use serde::{Deserialize, Serialize};
+use educe::Educe;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Educe)]
+#[educe(Clone(bound()))]
 #[serde(bound = "")]
-pub enum Packet<T: RoutingSystem> {
+pub enum Packet<T: RoutingSystem + ?Sized> {
     /// this is a single, unscheduled update that should be sent immediately.
     UrgentRouteUpdate(RouteUpdate<T>),
     /// this is a batch, full-table update that should only be sent periodically to all nodes
@@ -17,17 +19,19 @@ pub enum Packet<T: RoutingSystem> {
     },
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Educe)]
+#[educe(Clone(bound()))]
 #[serde(bound = "")]
-pub struct RouteUpdate<T: RoutingSystem> {
+pub struct RouteUpdate<T: RoutingSystem + ?Sized> {
     /// Secured source information signed by the source (address, seqno)
     pub source: T::MAC<Source<T>>,
     pub metric: u16,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Educe)]
 #[serde(bound = "")]
-pub struct OutboundPacket<T: RoutingSystem> {
+#[educe(Clone(bound()))]
+pub struct OutboundPacket<T: RoutingSystem + ?Sized> {
     /// send via this interface
     pub itf: T::InterfaceId,
     // to this destination
