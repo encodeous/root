@@ -6,13 +6,13 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/root/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/meshguard/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/simple-mesh/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/graph-gen/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/mesh-vis/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/graph-gen/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/mesh-vis/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/examples/simple-mesh/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/root/target" />
-      <excludeFolder url="file://$MODULE_DIR$/mesh-vis/root" />
-      <excludeFolder url="file://$MODULE_DIR$/mesh-vis/target" />
+      <excludeFolder url="file://$MODULE_DIR$/examples/mesh-vis/root" />
+      <excludeFolder url="file://$MODULE_DIR$/examples/mesh-vis/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-root = { path = "../root" }
+root = { path = "../../root" }
 net-route = "0.4.4"
 serde = { version = "1.0.204", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
