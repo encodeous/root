@@ -1,4 +1,4 @@
-import cytoscape from "./cytoscape.esm.min.mjs";
+import cytoscape from 'https://cdn.jsdelivr.net/npm/cytoscape@3.30.1/+esm'
 import cola from "https://esm.sh/cytoscape-cola"
 import yaml from "https://esm.sh/js-yaml";
 
