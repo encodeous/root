@@ -2,8 +2,7 @@
 
 members = [
     "root",
-    "graph-mesh",
+    "mesh-vis",
     "simple-mesh",
-    "graph-mesh",
     "graph-gen"
 ]
