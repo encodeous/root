@@ -1,9 +1,9 @@
-use crate::{DummyMAC, GraphInterface, GraphSystem, PAddr};
+use crate::{DummyMAC, GraphSystem, NType, PAddr};
 use anyhow::{anyhow, ensure, Context, Error};
 use linear_map::LinearMap;
 use root::concepts::packet::{Packet, RouteUpdate};
 use root::concepts::route::{Route, Source};
-use root::framework::MACSystem;
+use root::framework::MACSignature;
 use root::router::{Router, INF};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -11,6 +11,8 @@ use std::ptr::hash;
 use std::str::FromStr;
 use yaml_rust2::yaml::Hash;
 use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
+use root::concepts::interface::Interface;
+use root::concepts::neighbour::Neighbour;
 
 pub struct Graph {
     pub adj: Vec<(u8, u8, u16)>,
@@ -116,6 +118,7 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
 
 pub fn load(state: &Yaml) -> anyhow::Result<State> {
     let mut nodes: Vec<GraphSystem> = Vec::new();
+    let mut node_seqno: HashMap<u8, u16> = HashMap::new();
     let mut packets: BTreeMap<u8, Vec<(DummyMAC<Packet<GraphSystem>>, u8)>> = BTreeMap::new();
     let mut seqno_requests: BTreeMap<u8, Vec<(u8, u16)>> = BTreeMap::new();
 
@@ -188,6 +191,8 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
                     let values = seqno_requests.entry(addr).or_default();
                     values.push(parse_seqno_pair(pair)?)
                 }
+
+                node_seqno.insert(addr, v["seqno"].as_i64().unwrap_or(0) as u16);
             }
         }
 
@@ -214,16 +219,27 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
         
         // create the nodes
         for node in &node_ids {
-            let mut neigh = HashMap::<u8, u16>::new();
-            for entry in adj.iter().filter(|x| x.0 == *node) {
-                neigh.insert(entry.1, entry.2);
+            let mut neighbours = HashMap::new();
+            for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
+                neighbours.insert(
+                    *neigh,
+                    Neighbour{
+                        link_cost: *metric,
+                        addr: *neigh,
+                        routes: HashMap::new(),
+                        addr_phy: PAddr::GraphNode(*neigh),
+                        itf: 1
+                    }
+                );
             }
-            let itf = GraphInterface { neigh, id: *node };
             let mut sys = GraphSystem {
                 router: Router::new(*node),
             };
-            sys.router.init();
-            sys.router.add_interface(Box::new(itf));
+            sys.router.interfaces.insert(1, Interface{
+                net_type: NType::GraphT1,
+                id: 1,
+                neighbours
+            });
             nodes.push(sys);
         }
 
@@ -252,7 +268,6 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
         // create the nodes
         for sys in &mut nodes{
             let node = sys.router.address;
-            sys.router.refresh_interfaces();
 
             if seqno_requests.contains_key(&node) {
                 for (k, v) in &seqno_requests[&node] {
@@ -314,6 +329,7 @@ pub fn save(state: &State) -> Yaml {
             node_requests.push(serialize_seqno_pair(*k, *v))
         }
         y_node.insert(Yaml::from_str("seqno-requests"), Yaml::Array(node_requests));
+        y_node.insert(Yaml::from_str("seqno"), Yaml::Integer(node.router.seqno as i64));
 
         for (pkt, from) in state.packets.get(&addr).unwrap_or(&Vec::new()) {
             let mut pkt_map = Hash::new();
@@ -347,7 +363,7 @@ pub fn save(state: &State) -> Yaml {
 
         // calculate neighbours
         for (_, itf) in &node.router.interfaces {
-            for (n_addr, _) in &itf.neighbours {
+            for (n_addr, neigh) in &itf.neighbours {
                 if !pairs.contains(&(addr, *n_addr)) {
                     pairs.insert((addr, *n_addr));
                     pairs.insert((*n_addr, addr));
@@ -356,7 +372,7 @@ pub fn save(state: &State) -> Yaml {
                             "{} {} {}",
                             addr,
                             *n_addr,
-                            itf.net_if.get_cost(&PAddr::GraphNode(*n_addr))
+                            neigh.link_cost
                         )
                         .as_str(),
                     ));

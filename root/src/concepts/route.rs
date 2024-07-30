@@ -1,4 +1,4 @@
-use crate::framework::RoutingSystem;
+use crate::framework::{MAC, RoutingSystem};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -10,7 +10,7 @@ use educe::Educe;
 #[educe(Clone(bound()))]
 pub struct Route<T: RoutingSystem + ?Sized> {
     /// the source and seqno for which this route is advertised
-    pub source: T::MAC<Source<T>>,
+    pub source: MAC<Source<T>, T>,
     /// the interface that the neighbour is available on
     pub itf: Option<T::InterfaceId>,
     /// the metric with which this route was advertised by the neighbour, or FFFF hexadecimal (infinity) for a recently retracted route

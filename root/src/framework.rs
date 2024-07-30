@@ -7,18 +7,6 @@ use serde::Serialize;
 
 use crate::router::Router;
 
-// pub trait SystemNetwork: Sized {
-//     type NetworkTypes: Sized + TryFrom<u8> + Into<u8>;
-//     fn get_interfaces(&self) -> Vec<Box<dyn NetworkInterface<Self>>>;
-// }
-//
-// pub trait Routing {
-//     type AddressType: Sized + Hash + Eq + PartialEq;
-//     fn config() -> ProtocolParams {
-//         Default::default()
-//     }
-// }
-
 pub trait RoutingSystem {
     /// Address of the node on the routing network, MUST be globally unique
     type NodeAddress: Ord + PartialOrd + RootData + RootKey;
@@ -26,7 +14,8 @@ pub trait RoutingSystem {
     type PhysicalAddress: RootKey + RootData;
     type NetworkType: RootKey + RootData;
     type InterfaceId: RootKey + RootData;
-    type MAC<T: RootData>: MACSystem<T, Self>;
+    /// An opaque implementation that allows the node to sign packets
+    type MACSystem: MACSystem<Self>;
     /// type used for deduplication
     type DedupType: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
     fn config() -> ProtocolParams {
@@ -39,13 +28,18 @@ pub trait RootKey: Eq + PartialEq + Hash {}
 impl<T: Eq + PartialEq + Hash> RootKey for T {}
 impl<T: Clone + Serialize + DeserializeOwned + Sized> RootData for T {}
 
-pub trait MACSystem<V: RootData, T: RoutingSystem + ?Sized>: RootData
+pub trait MACSignature<V: RootData, T: RoutingSystem + ?Sized>: RootData
 {
     fn data(&self) -> &V;
     fn data_mut(&mut self) -> &mut V;
-    fn validate(&self, subject: &T::NodeAddress) -> bool;
-    fn sign(data: V, router: &Router<T>) -> T::MAC<V>;
 }
+
+pub trait MACSystem<T: RoutingSystem + ?Sized>: Default {
+    type MACSignatureType<V: RootData>: MACSignature<V, T>;
+    fn sign<V: RootData>(&self, data: V, router: &Router<T>) -> Self::MACSignatureType<V>;
+    fn validate<V: RootData>(&self, sig: &MAC<V, T>, subject: &T::NodeAddress) -> bool;
+}
+pub type MAC<V, T> = <<T as RoutingSystem>::MACSystem as MACSystem<T>>::MACSignatureType<V>;
 
 /// Appendix B. Protocol Parameters
 pub struct ProtocolParams {

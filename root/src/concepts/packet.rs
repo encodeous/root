@@ -1,7 +1,7 @@
-use crate::concepts::route::Source;
-use crate::framework::RoutingSystem;
-use serde::{Deserialize, Serialize};
 use educe::Educe;
+use serde::{Deserialize, Serialize};
+use crate::concepts::route::Source;
+use crate::framework::{MAC, RoutingSystem};
 
 #[derive(Serialize, Deserialize, Educe)]
 #[educe(Clone(bound()))]
@@ -24,7 +24,7 @@ pub enum Packet<T: RoutingSystem + ?Sized> {
 #[serde(bound = "")]
 pub struct RouteUpdate<T: RoutingSystem + ?Sized> {
     /// Secured source information signed by the source (address, seqno)
-    pub source: T::MAC<Source<T>>,
+    pub source: MAC<Source<T>, T>,
     pub metric: u16,
 }
 
@@ -36,5 +36,5 @@ pub struct OutboundPacket<T: RoutingSystem + ?Sized> {
     pub itf: T::InterfaceId,
     // to this destination
     pub addr_phy: T::PhysicalAddress,
-    pub packet: T::MAC<Packet<T>>,
+    pub packet: MAC<Packet<T>, T>,
 }

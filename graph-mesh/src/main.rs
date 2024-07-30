@@ -1,4 +1,4 @@
-use crate::graph_parse::{load, save, State};
+use crate::graph_parse::{load, save};
 use crate::sim::tick_state;
 use crate::NType::GraphT1;
 use crate::PAddr::GraphNode;
@@ -12,10 +12,9 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
 use mime_guess::Mime;
-use root::concepts::interface::{NetworkInterface};
 use root::concepts::packet::Packet;
-use root::framework::{MACSystem, RoutingSystem};
-use root::router::{Router, INF};
+use root::framework::{MACSignature, RoutingSystem};
+use root::router::{Router, INF, DummyMAC, NoMACSystem};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,7 +29,7 @@ use std::sync::Mutex;
 use tokio::net::TcpListener;
 use yaml_rust2::yaml::Hash;
 use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
-use log::error;
+use log::{error, info, warn};
 use simplelog::*;
 
 mod graph_parse;
@@ -52,7 +51,7 @@ pub enum PAddr {
     GraphNode(u8),
 }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
 pub enum NType {
     GraphT1,
 }
@@ -72,84 +71,15 @@ impl RoutingSystem for GraphSystem {
     type PhysicalAddress = PAddr;
     type NetworkType = NType;
     type InterfaceId = u8;
-    type MAC<T: Clone + Serialize + DeserializeOwned> = DummyMAC<T>;
+    type MACSystem = NoMACSystem;
     type DedupType = [u8; 16];
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct DummyMAC<T>
-where
-    T: Clone,
-{
-    pub data: T,
-}
-
-impl<V: Clone> Clone for DummyMAC<V> {
-    fn clone(&self) -> Self {
-        DummyMAC {
-            data: self.data.clone(),
-        }
-    }
-}
-
-impl<V: Clone + Serialize + DeserializeOwned> MACSystem<V, GraphSystem> for DummyMAC<V> {
-    fn data(&self) -> &V {
-        &self.data
-    }
-
-    fn data_mut(&mut self) -> &mut V {
-        &mut self.data
-    }
-
-    fn validate(&self, subject: &u8) -> bool {
-        true
-    }
-
-    fn sign(data: V, router: &Router<GraphSystem>) -> DummyMAC<V> {
-        DummyMAC::<V> { data }
-    }
-}
-
-#[derive(Eq, PartialEq)]
-struct GraphInterface {
-    neigh: HashMap<u8, u16>,
-    id: u8,
-}
-
-impl NetworkInterface<GraphSystem> for GraphInterface {
-    fn address(&self) -> PAddr {
-        GraphNode(self.id)
-    }
-
-    fn address_type(&self) -> NType {
-        GraphT1
-    }
-
-    fn id(&self) -> u8 {
-        1
-    }
-
-    fn get_cost(&self, addr: &PAddr) -> u16 {
-        if let GraphNode(id) = addr {
-            return self.neigh[id];
-        }
-        INF
-    }
-
-    fn get_neighbours(&self) -> Vec<(PAddr, u8)> {
-        let mut neighbours = Vec::new();
-        for (addr, cost) in &self.neigh {
-            neighbours.push((GraphNode(*addr), *addr))
-        }
-        neighbours
-    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     CombinedLogger::init(
         vec![
-            TermLogger::new(LevelFilter::Warn, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)
+            TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)
         ]
     ).unwrap();
 

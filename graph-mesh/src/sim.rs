@@ -35,7 +35,7 @@ pub fn tick_state(state: &mut State) {
 
     for node in state.nodes.iter_mut() {
         if refresh_interfaces {
-            node.router.refresh_interfaces()
+            // node.router.refresh_interfaces()
         }
         if update_routes {
             node.router.update_routes();

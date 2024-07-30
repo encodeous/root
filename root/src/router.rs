@@ -2,16 +2,14 @@ use crate::concepts::interface::{Interface};
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
 use crate::concepts::route::{Route, Source};
-use crate::framework::{MACSystem, RoutingSystem};
+use crate::framework::{MAC, MACSignature, MACSystem, RootData, RoutingSystem};
 use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
-use crate::util::{increment_by, seqno_less_than, sum_inf};
-use log::{error, trace, warn};
+use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
+use log::{error};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use std::ops::DerefMut;
-use std::time::Instant;
+use educe::Educe;
 
 pub const INF: u16 = 0xFFFF;
 
@@ -25,6 +23,9 @@ pub struct Router<T: RoutingSystem + ?Sized> {
     pub seqno_requests: HashMap<T::NodeAddress, u16>,
     pub broadcast_route_for: HashSet<T::NodeAddress>,
     pub outbound_packets: Vec<OutboundPacket<T>>,
+    pub seqno: u16,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub mac_sys: T::MACSystem
 }
 
 #[derive(Eq, PartialEq)]
@@ -36,24 +37,24 @@ enum UpdateAction {
 
 impl<T: RoutingSystem> Router<T> {
     pub fn new(address: T::NodeAddress) -> Self {
-        let mut data = Self{
+        Self{
             interfaces: HashMap::new(),
             routes: HashMap::new(),
             address,
             seqno_requests: HashMap::new(),
             broadcast_route_for: HashSet::new(),
             outbound_packets: Vec::new(),
-        };
-        data.routes.insert(data.address.clone(), data.make_self_route_for_seqno(0));
-        data
+            seqno: 0,
+            mac_sys: Default::default()
+        }
     }
 
     // region Interface
     /// writes a packet to the outbound packet queue for all neighbours
-    pub fn write_broadcast_packet(&mut self, packet: &T::MAC<Packet<T>>) {
+    pub fn write_broadcast_packet(&mut self, packet: &MAC<Packet<T>, T>) {
         // send to all neighbours
         for (itf_id, itf) in &self.interfaces {
-            for (n_addr, neigh) in &itf.neighbours {
+            for (_n_addr, neigh) in &itf.neighbours {
                 self.outbound_packets.push(OutboundPacket {
                     addr_phy: neigh.addr_phy.clone(),
                     itf: itf_id.clone(),
@@ -69,7 +70,7 @@ impl<T: RoutingSystem> Router<T> {
             fd: None,
             metric: 0,
             next_hop: None,
-            source: T::MAC::sign(
+            source: self.mac_sys.sign(
                 Source {
                     addr: self.address.clone(),
                     seqno,
@@ -91,7 +92,7 @@ impl<T: RoutingSystem> Router<T> {
                 let cur_seqno = self.get_seqno_for(addr);
                 if let Some(seqno) = cur_seqno {
                     let nseqno = increment_by(seqno, 1);
-                    packets.push(T::MAC::sign(
+                    packets.push(self.mac_sys.sign(
                         Packet::SeqnoRequest {
                             source: addr.clone(),
                             seqno: nseqno, // want to increment this at least one
@@ -126,7 +127,7 @@ impl<T: RoutingSystem> Router<T> {
     pub fn update_routes(&mut self) {
         // handle route retractions
         let mut retractions = Vec::new();
-        for (addr, route) in &mut self.routes {
+        for (_addr, route) in &mut self.routes {
             if let Some(nh) = &route.next_hop {
                 if let Some(itf) = &route.itf {
                     // this should always be true if the next hop exists
@@ -143,6 +144,10 @@ impl<T: RoutingSystem> Router<T> {
         for (id, itf) in &mut self.interfaces {
             for (n_addr, neigh) in &itf.neighbours {
                 for (src, neigh_route) in &neigh.routes {
+                    if *src == self.address{
+                        continue; // we can safely ignore a route to ourself
+                    }
+                    
                     let metric = sum_inf(neigh.link_cost, neigh_route.metric);
                     let entry = self.routes.get_mut(src);
 
@@ -196,13 +201,23 @@ impl<T: RoutingSystem> Router<T> {
     // pushes updates to neighbours
     pub fn broadcast_routes(&mut self) {
         let mut vec = Vec::new();
-        for (addr, route) in &self.routes {
+        for route in self.routes.values() {
             vec.push(RouteUpdate {
                 source: route.source.clone(),
                 metric: route.metric,
             })
         }
-        self.write_broadcast_packet(&T::MAC::sign(
+        vec.push(RouteUpdate{
+            source: self.mac_sys.sign(
+                Source {
+                    addr: self.address.clone(),
+                    seqno: self.seqno,
+                },
+                self,
+            ),
+            metric: 0
+        });
+        self.write_broadcast_packet(&self.mac_sys.sign(
             Packet::BatchRouteUpdate { routes: vec },
             self,
         ))
@@ -219,9 +234,24 @@ impl<T: RoutingSystem> Router<T> {
     }
 
     /// Creates a seqno packet using the data we already have
-    fn create_seqno_packet(&self, addr: &T::NodeAddress) -> Option<T::MAC<Packet<T>>> {
+    fn create_seqno_packet(&self, addr: &T::NodeAddress) -> Option<MAC<Packet<T>, T>> {
+        if *addr == self.address{
+            return Some(self.mac_sys.sign(
+                Packet::UrgentRouteUpdate(RouteUpdate{
+                    source: self.mac_sys.sign(
+                        Source {
+                            addr: self.address.clone(),
+                            seqno: self.seqno,
+                        },
+                        self,
+                    ),
+                    metric: 0
+                }),
+                self,
+            ));
+        }
         if let Some(route) = self.routes.get(addr) {
-            return Some(T::MAC::sign(
+            return Some(self.mac_sys.sign(
                 Packet::UrgentRouteUpdate(RouteUpdate {
                     source: route.source.clone(),
                     metric: route.metric,
@@ -233,8 +263,8 @@ impl<T: RoutingSystem> Router<T> {
     }
 
     /// broadcasts a retraction for a specific source, to all neighbours
-    fn write_retraction_for(&mut self, source: T::MAC<Source<T>>) {
-        self.write_broadcast_packet(&T::MAC::sign(
+    fn write_retraction_for(&mut self, source: MAC<Source<T>, T>) {
+        self.write_broadcast_packet(&self.mac_sys.sign(
             Packet::UrgentRouteUpdate(RouteUpdate {
                 source,
                 metric: INF,
@@ -246,11 +276,11 @@ impl<T: RoutingSystem> Router<T> {
     /// handle a single packet. if there is a response, it should be broadcast to ALL neighbours
     pub fn handle_packet(
         &mut self,
-        data: &T::MAC<Packet<T>>,
+        data: &MAC<Packet<T>, T>,
         itf: &T::InterfaceId,
         neigh: &T::NodeAddress,
     ) {
-        if !data.validate(neigh) {
+        if !self.mac_sys.validate(data, neigh) {
             error!(
                 "Rejected packet from {}, invalid neighbour MAC. Is there a MITM attack?",
                 json!(neigh)
@@ -266,7 +296,7 @@ impl<T: RoutingSystem> Router<T> {
                 // println!("[dbg] {} got packet {} from {}", json!(self.address), json!(data), json!(neigh));
                 match self.handle_neighbour_route_update(route, itf, neigh) {
                     SeqnoUpdate => {
-                        // lets rebroadcast this change, our seqno has increased!
+                        // let's rebroadcast this change, our seqno has increased!
                         self.broadcast_route_for
                             .insert(route.source.data().addr.clone());
                     }
@@ -296,7 +326,8 @@ impl<T: RoutingSystem> Router<T> {
                         self.broadcast_route_for.insert(source.clone());
                     } else if self.address == *source {
                         // we are the intended recipient, so we can broadcast this!
-                        self.broadcast_inc_seqno();
+                        increment(&mut self.seqno);
+                        self.broadcast_route_for.insert(self.address.clone());
                     } else {
                         let req_seqno = self.seqno_requests.entry(source.clone()).or_insert(0);
                         // prevent duplication and infinite amplification... :skull:
@@ -304,7 +335,7 @@ impl<T: RoutingSystem> Router<T> {
                             // println!("[dbg] re-requesting seqno src={}, cur_seqno={cur_seqno}, node={}", json!(source), json!(self.address));
                             // sadge, we need to request for seqno too
                             *req_seqno = *seqno; // make sure we dont ask for this seqno again
-                            self.write_broadcast_packet(&T::MAC::sign(
+                            self.write_broadcast_packet(&self.mac_sys.sign(
                                 Packet::SeqnoRequest {
                                     source: source.clone(),
                                     seqno: *seqno,
@@ -321,28 +352,11 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
     }
-    
-    pub fn broadcast_inc_seqno(&mut self){
-        if let Some(seqno) = self.get_seqno_for(&self.address){
-            let new_source = T::MAC::sign(
-                Source {
-                    addr: self.address.clone(),
-                    seqno: increment_by(seqno, 1),
-                },
-                self,
-            );
-
-            // println!("[dbg] cur_seqno={seqno}, new_seqno={}", new_source.data().seqno);
-
-            self.routes
-                .entry(self.address.clone())
-                .and_modify(|route| route.source = new_source);
-
-            self.broadcast_route_for.insert(self.address.clone());
-        }
-    }
 
     pub fn get_seqno_for(&self, addr: &T::NodeAddress) -> Option<u16> {
+        if *addr == self.address{
+            return Some(self.seqno);
+        }
         if let Some(x) = self.routes.get(addr) {
             let data = x.source.data();
             return Some(data.seqno);
@@ -360,7 +374,7 @@ impl<T: RoutingSystem> Router<T> {
         let Source { addr, seqno } = update.source.data();
 
         // validate update
-        if !update.source.validate(addr) {
+        if !self.mac_sys.validate(&update.source, addr) {
             error!(
                 "Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?",
                 json!(addr),
@@ -400,7 +414,7 @@ impl<T: RoutingSystem> Router<T> {
                     action = Retraction;
                 }
             } else if update.metric != INF || selected {
-                // we add the route if it is not INF and it is not the next hop
+                // we add the route if it is not INF, and it is not the next hop
                 let route = Route {
                     source: update.source.clone(),
                     metric: update.metric,
@@ -437,5 +451,40 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
         None
+    }
+}
+
+#[derive(Default)]
+pub struct NoMACSystem {
+
+}
+
+#[derive(Serialize, Deserialize, Educe)]
+#[educe(Clone(bound()))]
+#[serde(bound = "")]
+pub struct DummyMAC<V: RootData>{
+    pub data: V,
+}
+
+impl<V: RootData, T: RoutingSystem + ?Sized> MACSignature<V, T> for DummyMAC<V>{
+    fn data(&self) -> &V {
+        &self.data
+    }
+
+    fn data_mut(&mut self) -> &mut V {
+        &mut self.data
+    }
+}
+
+impl<T: RoutingSystem + ?Sized> MACSystem<T> for NoMACSystem {
+    type MACSignatureType<V: RootData> = DummyMAC<V>;
+    fn sign<V: RootData>(&self, data: V, router: &Router<T>) -> DummyMAC<V>{
+        DummyMAC{
+            data
+        }
+    }
+
+    fn validate<V: RootData>(&self, sig: &MAC<V, T>, subject: &T::NodeAddress) -> bool {
+        true
     }
 }
