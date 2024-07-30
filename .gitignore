@@ -23,3 +23,5 @@ Cargo.lock
 .DS_Store
 
 /examples/graph-mesh/graph-mesh
+
+.idea
