@@ -1,4 +1,3 @@
-use crate::concepts::interface::{Interface};
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
 use crate::concepts::route::{Route, Source};
@@ -16,7 +15,7 @@ pub const INF: u16 = 0xFFFF;
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Router<T: RoutingSystem + ?Sized> {
-    pub interfaces: HashMap<T::InterfaceId, Interface<T>>,
+    pub links: HashMap<(T::Link, T::NodeAddress), Neighbour<T>>,
     /// Source, Route
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
@@ -38,7 +37,7 @@ enum UpdateAction {
 impl<T: RoutingSystem> Router<T> {
     pub fn new(address: T::NodeAddress) -> Self {
         Self{
-            interfaces: HashMap::new(),
+            links: HashMap::new(),
             routes: HashMap::new(),
             address,
             seqno_requests: HashMap::new(),
@@ -53,20 +52,18 @@ impl<T: RoutingSystem> Router<T> {
     /// writes a packet to the outbound packet queue for all neighbours
     pub fn write_broadcast_packet(&mut self, packet: &MAC<Packet<T>, T>) {
         // send to all neighbours
-        for (itf_id, itf) in &self.interfaces {
-            for (_n_addr, neigh) in &itf.neighbours {
-                self.outbound_packets.push(OutboundPacket {
-                    addr_phy: neigh.addr_phy.clone(),
-                    itf: itf_id.clone(),
-                    packet: packet.clone(),
-                });
-            }
+        for ((link, node_addr), neigh) in &self.links {
+            self.outbound_packets.push(OutboundPacket {
+                dest_addr: node_addr.clone(),
+                link: link.clone(),
+                packet: packet.clone(),
+            });
         }
     }
 
     fn make_self_route_for_seqno(&self, seqno: u16) -> Route<T> {
         Route {
-            itf: None,
+            link: None,
             fd: None,
             metric: 0,
             next_hop: None,
@@ -129,65 +126,61 @@ impl<T: RoutingSystem> Router<T> {
         let mut retractions = Vec::new();
         for (_addr, route) in &mut self.routes {
             if let Some(nh) = &route.next_hop {
-                if let Some(itf) = &route.itf {
+                if let Some(link) = &route.link {
                     // this should always be true if the next hop exists
-                    if let Some(x) = self.interfaces.get(itf) {
-                        if !x.neighbours.contains_key(nh) {
-                            // disconnected route, should retract
-                            route.metric = INF;
-                            retractions.push(route.source.clone());
-                        }
+                    // check if link still exists
+                    if let None = self.links.get(&(link.clone(), nh.clone())){
+                        route.metric = INF;
+                        retractions.push(route.source.clone());
                     }
                 }
             }
         }
-        for (id, itf) in &mut self.interfaces {
-            for (n_addr, neigh) in &itf.neighbours {
-                for (src, neigh_route) in &neigh.routes {
-                    if *src == self.address{
-                        continue; // we can safely ignore a route to ourself
-                    }
-                    
-                    let metric = sum_inf(neigh.link_cost, neigh_route.metric);
-                    let entry = self.routes.get_mut(src);
+        for ((link, n_addr), neigh) in &self.links {
+            for (src, neigh_route) in &neigh.routes {
+                if *src == self.address{
+                    continue; // we can safely ignore a route to ourself
+                }
 
-                    // if the table has the route
-                    if let Some(table_route) = entry {
-                        // update route table if the entry is better
-                        if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric) {
-                            // we have a better route!
-                            table_route.next_hop = Some(neigh.addr.clone());
-                            table_route.metric = metric;
-                            table_route.source = neigh_route.source.clone();
-                            table_route.fd = Some(new_fd);
-                            table_route.itf = Some(id.clone());
-                        } else if let Some(nh) = &table_route.next_hop {
-                            // this is a selected route, we should update this regardless.
-                            if nh == n_addr {
-                                // update route metric
-                                if let Some(fd) = table_route.fd {
-                                    if metric > fd {
-                                        // infeasible route, we should retract this
-                                        table_route.metric = INF;
-                                        retractions.push(table_route.source.clone());
-                                    } else {
-                                        // same or better route
-                                        table_route.metric = metric;
-                                        table_route.fd = Some(metric);
-                                    }
+                let metric = sum_inf(neigh.link_cost, neigh_route.metric);
+                let entry = self.routes.get_mut(src);
+
+                // if the table has the route
+                if let Some(table_route) = entry {
+                    // update route table if the entry is better
+                    if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric) {
+                        // we have a better route!
+                        table_route.next_hop = Some(neigh.addr.clone());
+                        table_route.metric = metric;
+                        table_route.source = neigh_route.source.clone();
+                        table_route.fd = Some(new_fd);
+                        table_route.link = Some(link.clone());
+                    } else if let Some(nh) = &table_route.next_hop {
+                        // this is a selected route, we should update this regardless.
+                        if nh == n_addr {
+                            // update route metric
+                            if let Some(fd) = table_route.fd {
+                                if metric > fd {
+                                    // infeasible route, we should retract this
+                                    table_route.metric = INF;
+                                    retractions.push(table_route.source.clone());
+                                } else {
+                                    // same or better route
+                                    table_route.metric = metric;
+                                    table_route.fd = Some(metric);
                                 }
                             }
                         }
-                    } else {
-                        // create the new route
-                        let mut n_route = neigh_route.clone();
-                        n_route.next_hop = Some(neigh.addr.clone());
-                        n_route.metric = metric;
-                        n_route.fd = Some(metric);
-                        n_route.itf = Some(id.clone());
-
-                        self.routes.insert(src.clone(), n_route);
                     }
+                } else {
+                    // create the new route
+                    let mut n_route = neigh_route.clone();
+                    n_route.next_hop = Some(neigh.addr.clone());
+                    n_route.metric = metric;
+                    n_route.fd = Some(metric);
+                    n_route.link = Some(link.clone());
+
+                    self.routes.insert(src.clone(), n_route);
                 }
             }
         }
@@ -277,7 +270,7 @@ impl<T: RoutingSystem> Router<T> {
     pub fn handle_packet(
         &mut self,
         data: &MAC<Packet<T>, T>,
-        itf: &T::InterfaceId,
+        itf: &T::Link,
         neigh: &T::NodeAddress,
     ) {
         if !self.mac_sys.validate(data, neigh) {
@@ -368,7 +361,7 @@ impl<T: RoutingSystem> Router<T> {
     fn handle_neighbour_route_update(
         &mut self,
         update: &RouteUpdate<T>,
-        itf: &T::InterfaceId,
+        itf: &T::Link,
         neigh: &T::NodeAddress,
     ) -> UpdateAction {
         let Source { addr, seqno } = update.source.data();
@@ -401,7 +394,7 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
 
-        if let Some(neighbour) = self.get_neighbour_mut(itf, neigh) {
+        if let Some(neighbour) = self.links.get_mut(&(itf.clone(), neigh.clone())) {
             // update the value
             if let Some(entry) = neighbour.routes.get_mut(addr) {
                 entry.source = update.source.clone();
@@ -418,7 +411,7 @@ impl<T: RoutingSystem> Router<T> {
                 let route = Route {
                     source: update.source.clone(),
                     metric: update.metric,
-                    itf: None,
+                    link: None,
                     fd: None,
                     next_hop: None,
                 };
@@ -426,31 +419,6 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
         action
-    }
-
-    pub fn get_neighbour(
-        &self,
-        itf: &T::InterfaceId,
-        neigh: &T::NodeAddress,
-    ) -> Option<&Neighbour<T>> {
-        if let Some(interface) = self.interfaces.get(itf) {
-            if let Some(neighbour) = interface.neighbours.get(neigh) {
-                return Some(neighbour);
-            }
-        }
-        None
-    }
-    pub fn get_neighbour_mut(
-        &mut self,
-        itf: &T::InterfaceId,
-        neigh: &T::NodeAddress,
-    ) -> Option<&mut Neighbour<T>> {
-        if let Some(interface) = self.interfaces.get_mut(itf) {
-            if let Some(neighbour) = interface.neighbours.get_mut(neigh) {
-                return Some(neighbour);
-            }
-        }
-        None
     }
 }
 

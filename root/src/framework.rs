@@ -1,4 +1,3 @@
-use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::time::Duration;
 
@@ -10,14 +9,10 @@ use crate::router::Router;
 pub trait RoutingSystem {
     /// Address of the node on the routing network, MUST be globally unique
     type NodeAddress: Ord + PartialOrd + RootData + RootKey;
-    /// Address of a node on the physical network, may not be globally unique, and may be overlapping
-    type PhysicalAddress: RootKey + RootData;
-    type NetworkType: RootKey + RootData;
-    type InterfaceId: RootKey + RootData;
+    /// A type that describes a physical interface or higher level concept that allows this node to talk to another node via some method
+    type Link: RootKey + RootData;
     /// An opaque implementation that allows the node to sign packets
     type MACSystem: MACSystem<Self>;
-    /// type used for deduplication
-    type DedupType: Sized + Hash + Eq + PartialEq + Ord + PartialOrd + Clone;
     fn config() -> ProtocolParams {
         Default::default()
     }

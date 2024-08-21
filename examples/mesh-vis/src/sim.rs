@@ -1,5 +1,5 @@
 use crate::graph_parse::State;
-use crate::{DummyMAC, GraphSystem, PAddr};
+use crate::{DummyMAC, GraphSystem};
 use root::concepts::packet::Packet;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -58,10 +58,8 @@ pub fn tick_state(state: &mut State) {
 
         for packet in node.router.outbound_packets.drain(..) {
             // println!("[dbg] OP {} -> {}: {}", node.router.address, packet.addr_phy, json!(packet.packet));
-            if let PAddr::GraphNode(d_node) = packet.addr_phy {
-                let values = state.packets.entry(d_node).or_default();
-                values.push((packet.packet, node.router.address))
-            }
+            let values = state.packets.entry(packet.dest_addr).or_default();
+            values.push((packet.packet, node.router.address))
         }
     }
 }

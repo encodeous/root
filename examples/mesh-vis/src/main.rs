@@ -1,7 +1,5 @@
 use crate::graph_parse::{load, save};
 use crate::sim::tick_state;
-use crate::NType::GraphT1;
-use crate::PAddr::GraphNode;
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Bytes;
@@ -46,33 +44,10 @@ impl Clone for GraphSystem {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
-pub enum PAddr {
-    GraphNode(u8),
-}
-
-#[derive(Eq, PartialEq, Hash, Serialize, Deserialize, Clone)]
-pub enum NType {
-    GraphT1,
-}
-
-impl Display for PAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let GraphNode(id) = self {
-            write!(f, "{}", id)
-        } else {
-            write!(f, "Unknown Address Type")
-        }
-    }
-}
-
 impl RoutingSystem for GraphSystem {
     type NodeAddress = u8;
-    type PhysicalAddress = PAddr;
-    type NetworkType = NType;
-    type InterfaceId = u8;
+    type Link = u8;
     type MACSystem = NoMACSystem;
-    type DedupType = [u8; 16];
 }
 
 #[tokio::main]

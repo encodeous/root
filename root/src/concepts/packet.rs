@@ -32,9 +32,8 @@ pub struct RouteUpdate<T: RoutingSystem + ?Sized> {
 #[serde(bound = "")]
 #[educe(Clone(bound()))]
 pub struct OutboundPacket<T: RoutingSystem + ?Sized> {
-    /// send via this interface
-    pub itf: T::InterfaceId,
-    // to this destination
-    pub addr_phy: T::PhysicalAddress,
+    /// send via this link
+    pub link: T::Link,
+    pub dest_addr: T::NodeAddress,
     pub packet: MAC<Packet<T>, T>,
 }

@@ -1,4 +1,4 @@
-use crate::{DummyMAC, GraphSystem, NType, PAddr};
+use crate::{DummyMAC, GraphSystem};
 use anyhow::{anyhow, ensure, Context, Error};
 use linear_map::LinearMap;
 use root::concepts::packet::{Packet, RouteUpdate};
@@ -11,7 +11,6 @@ use std::ptr::hash;
 use std::str::FromStr;
 use yaml_rust2::yaml::Hash;
 use yaml_rust2::{Yaml, YamlEmitter, YamlLoader};
-use root::concepts::interface::Interface;
 use root::concepts::neighbour::Neighbour;
 
 pub struct Graph {
@@ -101,7 +100,7 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
             metric,
             next_hop: Some(next_hop),
             fd: if fd == INF { None } else { Some(fd) },
-            itf: Some(1),
+            link: Some(1),
         })
     } else {
         // self route
@@ -111,7 +110,7 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
             metric: 0,
             next_hop: None,
             fd: None,
-            itf: None,
+            link: None,
         })
     }
 }
@@ -219,27 +218,17 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
         
         // create the nodes
         for node in &node_ids {
-            let mut neighbours = HashMap::new();
-            for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
-                neighbours.insert(
-                    *neigh,
-                    Neighbour{
-                        link_cost: *metric,
-                        addr: *neigh,
-                        routes: HashMap::new(),
-                        addr_phy: PAddr::GraphNode(*neigh),
-                        itf: 1
-                    }
-                );
-            }
             let mut sys = GraphSystem {
                 router: Router::new(*node),
             };
-            sys.router.interfaces.insert(1, Interface{
-                net_type: NType::GraphT1,
-                id: 1,
-                neighbours
-            });
+            for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
+                sys.router.links.insert((1, *neigh), Neighbour{
+                    link_cost: *metric,
+                    addr: *neigh,
+                    routes: HashMap::new(),
+                    link: 1
+                });
+            }
             nodes.push(sys);
         }
 
@@ -362,21 +351,19 @@ pub fn save(state: &State) -> Yaml {
         );
 
         // calculate neighbours
-        for (_, itf) in &node.router.interfaces {
-            for (n_addr, neigh) in &itf.neighbours {
-                if !pairs.contains(&(addr, *n_addr)) {
-                    pairs.insert((addr, *n_addr));
-                    pairs.insert((*n_addr, addr));
-                    neighbours.push(Yaml::from_str(
-                        format!(
-                            "{} {} {}",
-                            addr,
-                            *n_addr,
-                            neigh.link_cost
-                        )
+        for ((_link, n_addr), neigh) in &node.router.links {
+            if !pairs.contains(&(addr, *n_addr)) {
+                pairs.insert((addr, *n_addr));
+                pairs.insert((*n_addr, addr));
+                neighbours.push(Yaml::from_str(
+                    format!(
+                        "{} {} {}",
+                        addr,
+                        *n_addr,
+                        neigh.link_cost
+                    )
                         .as_str(),
-                    ));
-                }
+                ));
             }
         }
 

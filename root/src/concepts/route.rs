@@ -11,8 +11,8 @@ use educe::Educe;
 pub struct Route<T: RoutingSystem + ?Sized> {
     /// the source and seqno for which this route is advertised
     pub source: MAC<Source<T>, T>,
-    /// the interface that the neighbour is available on
-    pub itf: Option<T::InterfaceId>,
+    /// the physical link that connects to the neighbour
+    pub link: Option<T::Link>,
     /// the metric with which this route was advertised by the neighbour, or FFFF hexadecimal (infinity) for a recently retracted route
     pub metric: u16,
     /// the feasibility distance

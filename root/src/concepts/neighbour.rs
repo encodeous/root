@@ -8,10 +8,8 @@ use crate::framework::RoutingSystem;
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Neighbour<T: RoutingSystem + ?Sized> {
-    /// the physical interface where the neighbour resides
-    pub itf: T::InterfaceId,
-    /// the physical address of the neighbouring interface
-    pub addr_phy: T::PhysicalAddress,
+    /// the physical network link id, the pair (link, addr) should be unique
+    pub link: T::Link,
     /// the routing network address
     pub addr: T::NodeAddress,
     // pub hello_interval: Duration,
@@ -26,8 +24,8 @@ impl<T: RoutingSystem + ?Sized> Neighbour<T> {}
 
 impl<T: RoutingSystem + ?Sized> PartialEq for Neighbour<T> {
     fn eq(&self, other: &Self) -> bool {
-        // same neighbour if they share the same interface and network address
+        // same neighbour if they share the same link
 
-        self.itf == other.itf && self.addr_phy == other.addr_phy && self.addr == other.addr
+        self.link == other.link && self.addr == other.addr
     }
 }
