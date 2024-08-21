@@ -4,7 +4,7 @@ use std::net::Ipv4Addr;
 use serde::{Deserialize, Serialize};
 
 use root::framework::RoutingSystem;
-use root::router::NoMACSystem;
+use root::router::{NoMACSystem, Router};
 
 pub struct IPV4System {}
 
@@ -17,6 +17,6 @@ impl RoutingSystem for IPV4System {
     type PhysicalAddress = Ipv4Addr;
     type NetworkType = NType;
     type InterfaceId = u32;
-    type DedupType = [u8; 16];
     type MACSystem = NoMACSystem;
+    type DedupType = [u8; 16];
 }
