@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use root::concepts::packet::Packet;
 use crate::routing::IPV4System;
 
 #[derive(Serialize, Deserialize)]
 pub enum NetPacket{
-    Ping(u32),
-    Pong(u32),
+    Ping(Uuid),
+    Pong(Uuid),
     Routing {
-        link_id: u32,
+        link_id: Uuid,
         data: Packet<IPV4System>
     }
 }

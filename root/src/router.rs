@@ -1,7 +1,7 @@
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
 use crate::concepts::route::{Route, Source};
-use crate::framework::{MAC, MACSignature, MACSystem, RootData, RoutingSystem};
+use crate::framework::{LinkAddress, MAC, MACSignature, MACSystem, RootData, RoutingSystem};
 use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
 use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
 use log::{error};
@@ -15,7 +15,7 @@ pub const INF: u16 = 0xFFFF;
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Router<T: RoutingSystem + ?Sized> {
-    pub links: HashMap<(T::Link, T::NodeAddress), Neighbour<T>>,
+    pub links: HashMap<LinkAddress<T>, Neighbour<T>>,
     /// Source, Route
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
@@ -54,8 +54,7 @@ impl<T: RoutingSystem> Router<T> {
         // send to all neighbours
         for ((link, node_addr), neigh) in &self.links {
             self.outbound_packets.push(OutboundPacket {
-                dest_addr: node_addr.clone(),
-                link: link.clone(),
+                link_addr: (link.clone(), node_addr.clone()),
                 packet: packet.clone(),
             });
         }
@@ -266,13 +265,13 @@ impl<T: RoutingSystem> Router<T> {
         ))
     }
 
-    /// handle a single packet. if there is a response, it should be broadcast to ALL neighbours
+    /// handle a single packet
     pub fn handle_packet(
         &mut self,
         data: &MAC<Packet<T>, T>,
-        itf: &T::Link,
-        neigh: &T::NodeAddress,
+        link_addr: &LinkAddress<T>
     ) {
+        let (link , neigh) = link_addr;
         if !self.mac_sys.validate(data, neigh) {
             error!(
                 "Rejected packet from {}, invalid neighbour MAC. Is there a MITM attack?",
@@ -287,7 +286,7 @@ impl<T: RoutingSystem> Router<T> {
         match data.data() {
             Packet::UrgentRouteUpdate(route) => {
                 // println!("[dbg] {} got packet {} from {}", json!(self.address), json!(data), json!(neigh));
-                match self.handle_neighbour_route_update(route, itf, neigh) {
+                match self.handle_neighbour_route_update(route, link_addr) {
                     SeqnoUpdate => {
                         // let's rebroadcast this change, our seqno has increased!
                         self.broadcast_route_for
@@ -302,7 +301,7 @@ impl<T: RoutingSystem> Router<T> {
             }
             Packet::BatchRouteUpdate { routes } => {
                 for route in routes {
-                    self.handle_neighbour_route_update(route, itf, neigh);
+                    self.handle_neighbour_route_update(route, link_addr);
                 }
             }
             Packet::SeqnoRequest { source, seqno } => {
@@ -361,10 +360,10 @@ impl<T: RoutingSystem> Router<T> {
     fn handle_neighbour_route_update(
         &mut self,
         update: &RouteUpdate<T>,
-        itf: &T::Link,
-        neigh: &T::NodeAddress,
+        link_addr: &LinkAddress<T>,
     ) -> UpdateAction {
         let Source { addr, seqno } = update.source.data();
+        let (link , neigh) = link_addr;
 
         // validate update
         if !self.mac_sys.validate(&update.source, addr) {
@@ -394,7 +393,7 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
 
-        if let Some(neighbour) = self.links.get_mut(&(itf.clone(), neigh.clone())) {
+        if let Some(neighbour) = self.links.get_mut(&(link.clone(), neigh.clone())) {
             // update the value
             if let Some(entry) = neighbour.routes.get_mut(addr) {
                 entry.source = update.source.clone();
@@ -432,6 +431,14 @@ pub struct NoMACSystem {
 #[serde(bound = "")]
 pub struct DummyMAC<V: RootData>{
     pub data: V,
+}
+
+impl<V: RootData> From<V> for DummyMAC<V>{
+    fn from(value: V) -> Self {
+        Self{
+            data: value
+        }
+    }
 }
 
 impl<V: RootData, T: RoutingSystem + ?Sized> MACSignature<V, T> for DummyMAC<V>{

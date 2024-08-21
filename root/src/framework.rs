@@ -35,6 +35,7 @@ pub trait MACSystem<T: RoutingSystem + ?Sized>: Default {
     fn validate<V: RootData>(&self, sig: &MAC<V, T>, subject: &T::NodeAddress) -> bool;
 }
 pub type MAC<V, T> = <<T as RoutingSystem>::MACSystem as MACSystem<T>>::MACSignatureType<V>;
+pub type LinkAddress<T> = (<T as RoutingSystem>::Link, <T as RoutingSystem>::NodeAddress);
 
 /// Appendix B. Protocol Parameters
 pub struct ProtocolParams {

@@ -8,19 +8,21 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use anyhow::Context;
 use futures::{AsyncWriteExt, SinkExt, TryStreamExt};
-use inquire::{MultiSelect, prompt_u32};
+use inquire::{MultiSelect, prompt_text, prompt_u32};
 use inquire::list_option::ListOption;
 use inquire::validator::Validation;
 use log::{debug, error, info, warn};
 use netdev::ip::Ipv4Net;
+use serde::de::Unexpected::Str;
 use serde_json::json;
 use simplelog::*;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
-use root::router::Router;
+use root::router::{DummyMAC, Router};
 use crate::state::{OperatingState, PersistentState};
 use crate::routing::IPV4System;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -36,8 +38,17 @@ async fn save_state(cfg: &PersistentState) -> anyhow::Result<()> {
 
 async fn setup() -> anyhow::Result<PersistentState> {
     info!("Node Setup (First Time):");
-    let id = prompt_u32("Pick a unique node id (u32): ")?;
-
+    let mut id;
+    loop{
+        id = prompt_text("Pick a unique node id (lowercase string, no spaces): ")?;
+        if id.bytes().any(|x| !x.is_ascii_lowercase() && x != b'-' && !x.is_ascii_digit()){
+            error!("Try again.")
+        }
+        else{
+            break;
+        }
+    }
+    
     info!("Set node id to {id}");
 
     Ok(PersistentState {
@@ -99,11 +110,17 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         NetPacket::Pong(id) => {
             if let Some(link) = cs.links.get(&id){
                 debug!("Pong received from {}", link.neigh_addr);
-                
+                // update link timing
+                if let Some(health) = os.health.get_mut(&id){
+                    health.last_ping = Instant::now();
+                    health.ping = (Instant::now() - health.ping_start) / 2;
+                }
             }
         }
         NetPacket::Routing { link_id, data } => {
-            
+            if let Some(link) = cs.links.get(&link_id){
+                cs.router.handle_packet(data);
+            }
         }
     }
 
