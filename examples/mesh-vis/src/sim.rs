@@ -27,7 +27,7 @@ pub fn tick_state(state: &mut State) {
     for node in state.nodes.iter_mut() {
         if let Some(packets) = state.packets.get(&node.router.address) {
             for (packet, addr) in packets {
-                node.router.handle_packet(packet, &(1u8), addr);
+                node.router.handle_packet(packet, &(1, *addr));
             }
         }
     }
@@ -58,7 +58,7 @@ pub fn tick_state(state: &mut State) {
 
         for packet in node.router.outbound_packets.drain(..) {
             // println!("[dbg] OP {} -> {}: {}", node.router.address, packet.addr_phy, json!(packet.packet));
-            let values = state.packets.entry(packet.dest_addr).or_default();
+            let values = state.packets.entry(packet.link_addr.1).or_default();
             values.push((packet.packet, node.router.address))
         }
     }

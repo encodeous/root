@@ -9,16 +9,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use educe::Educe;
+use serde_with::serde_as;
 
 pub const INF: u16 = 0xFFFF;
 
+#[serde_as]
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Router<T: RoutingSystem + ?Sized> {
+    #[serde_as(as = "Vec<(_, _)>")]
     pub links: HashMap<LinkAddress<T>, Neighbour<T>>,
     /// Source, Route
+    /// #[serde_as(as = "Vec<(_, _)>")]
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
+    #[serde_as(as = "Vec<(_, _)>")]
     pub seqno_requests: HashMap<T::NodeAddress, u16>,
     pub broadcast_route_for: HashSet<T::NodeAddress>,
     pub outbound_packets: Vec<OutboundPacket<T>>,
