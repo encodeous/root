@@ -8,6 +8,7 @@ use std::io::{BufRead, stdin};
 use std::io::ErrorKind::ConnectionRefused;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
+use std::ops::DerefMut;
 use std::str::FromStr;
 use std::sync::{Arc};
 use std::time::{Duration, Instant};
@@ -97,21 +98,25 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
     }
 }
 
+async fn ping(os: &mut OperatingState, id: Uuid, addr: Ipv4Addr, silent: bool){
+    let entry = os.health.entry(id).or_insert(
+        LinkHealth {
+            ping: Duration::from_millis(100),
+            ping_start: Instant::now(),
+            last_ping: Instant::now()
+        }
+    );
+    entry.ping_start = Instant::now();
+    send_packets(addr, vec![Ping(id, silent)]);
+}
+
 async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
         let mut cs = state.lock().await;
         let mut os = op_state.lock().await;
         for (lid, nlink) in &cs.links{
-            os.health.entry(*lid).or_insert(
-                LinkHealth {
-                    ping: Duration::from_millis(100),
-                    ping_start: Instant::now(),
-                    last_ping: Instant::now()
-                }
-            );
-
-            send_packets(nlink.neigh_addr, vec![Ping(*lid, true)]);
+            ping(os.deref_mut(), *lid, nlink.neigh_addr, true).await;
         }
     }
 }
@@ -283,7 +288,7 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 if let Some((id, link)) = cs.links.iter().find(|(id, _)| id.to_string() == split[1]) {
-                    send_packet(link.neigh_addr, Ping(*id, false));
+                    ping(os.deref_mut(), *id, link.neigh_addr, false).await;
                 } else {
                     warn!("No ")
                 }
