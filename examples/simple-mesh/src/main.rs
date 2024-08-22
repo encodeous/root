@@ -4,6 +4,7 @@ mod state;
 mod packet;
 
 use std::collections::HashMap;
+use std::fmt::format;
 use std::io::{BufRead, stdin};
 use std::io::ErrorKind::ConnectionRefused;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
@@ -98,25 +99,62 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
     }
 }
 
-async fn ping(os: &mut OperatingState, id: Uuid, addr: Ipv4Addr, silent: bool){
-    let entry = os.health.entry(id).or_insert(
-        LinkHealth {
-            ping: Duration::MAX,
-            ping_start: Instant::now(),
-            last_ping: Instant::now()
+async fn ping(op_state: Arc<Mutex<OperatingState>>, id: Uuid, addr: Ipv4Addr, silent: bool) {
+    {
+        let mut os = op_state.lock().await;
+        let entry = os.health.entry(id).or_insert(
+            LinkHealth {
+                ping: Duration::MAX,
+                ping_start: Instant::now(),
+                last_ping: Instant::now(),
+            }
+        );
+        entry.ping_start = Instant::now();
+    }
+    tokio::spawn(async move {
+        if let Err(_) = send_packets_wait(addr, vec![Ping(id, silent)]).await {
+            let mut os = op_state.lock().await;
+            os.health.entry(id).and_modify(|x| {
+                x.ping = Duration::MAX
+            });
         }
-    );
-    entry.ping_start = Instant::now();
-    send_packets(addr, vec![Ping(id, silent)]);
+    });
 }
 
 async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
         let mut cs = state.lock().await;
-        let mut os = op_state.lock().await;
-        for (lid, nlink) in &cs.links{
-            ping(os.deref_mut(), *lid, nlink.neigh_addr, true).await;
+        for (lid, nlink) in &cs.links {
+            ping(op_state.clone(), *lid, nlink.neigh_addr, true).await;
+        }
+    }
+}
+async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()> {
+    loop {
+        sleep(Duration::from_millis(5000)).await;
+        let mut cs = state.lock().await;
+        cs.router.full_update();
+
+        save_state(&cs).await?;
+    }
+}
+
+fn send_outbound(cs: &mut PersistentState) {
+    let mut dsts = HashMap::new();
+    for pkt in cs.router.outbound_packets.drain(..) {
+        let entry = dsts.entry(pkt.link_addr.clone()).or_insert_with(|| {
+            vec![]
+        });
+        entry.push(NetPacket::Routing {
+            link_id: pkt.link_addr.0,
+            data: pkt.packet.data,
+        });
+    }
+
+    for (dst, data) in dsts {
+        if let Some(netaddr) = cs.links.get(&dst.0) {
+            send_packets(netaddr.neigh_addr, data);
         }
     }
 }
@@ -133,12 +171,21 @@ fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
                 }
             }
             Err(err) => {
-                if(err.kind() != ConnectionRefused) {
+                if (err.kind() != ConnectionRefused) {
                     anyhow::Result::<()>::Err(anyhow!(err)).unwrap();
                 }
             }
         };
     });
+}
+async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Result<()> {
+    let stream = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await?;
+    let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
+    let mut serialized = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
+    for pkt in pkts {
+        serialized.send(pkt).await?;
+    }
+    Ok(())
 }
 
 fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
@@ -172,8 +219,11 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         }
         NetPacket::Routing { link_id, data } => {
             if let Some(link) = cs.links.get(&link_id) {
-                let link_addr = (link.link.clone(), link.neigh_node.clone());
+                let link_addr = (link.link, link.neigh_node.clone());
+                info!("Routing Packet: {}", json!(data));
                 cs.router.handle_packet(&DummyMAC::from(data), &link_addr);
+                cs.router.update();
+                send_outbound(cs.deref_mut());
             }
         }
         LinkRequest { link_id, from } => {
@@ -181,7 +231,7 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
             os.link_requests.insert(link_id, NetLink {
                 link: link_id,
                 neigh_addr: addr.clone(),
-                neigh_node: from
+                neigh_node: from,
             });
         }
         NetPacket::LinkResponse { link_id, node_id } => {
@@ -191,12 +241,12 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                 let link = (link_id, node_id.clone());
                 cs.router.links.insert(
                     link.clone(),
-                    Neighbour{
+                    Neighbour {
                         addr: node_id.clone(),
                         link: link_id,
                         link_cost: INF,
-                        routes: HashMap::new()
-                    }
+                        routes: HashMap::new(),
+                    },
                 );
                 cs.links.insert(link_id, net_link);
             }
@@ -227,7 +277,8 @@ async fn main() -> anyhow::Result<()> {
 
     let handles = [
         tokio::spawn(server(per_state.clone(), op_state.clone())),
-        tokio::spawn(ping_updater(per_state.clone(), op_state.clone()))
+        tokio::spawn(ping_updater(per_state.clone(), op_state.clone())),
+        tokio::spawn(route_updater(per_state.clone()))
     ];
 
     // handle I/O
@@ -235,9 +286,9 @@ async fn main() -> anyhow::Result<()> {
     info!("Type \"help\" for help");
 
     let iter = stdin().lock().lines();
-    for line in iter{
+    for line in iter {
         let input = match line {
-            Ok(x) => {Ok(x)}
+            Ok(x) => { Ok(x) }
             Err(err) => {
                 let cs = per_state.lock().await;
                 save_state(&cs).await?;
@@ -247,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
         let mut cs = per_state.lock().await;
         let mut os = op_state.lock().await;
         let split: Vec<&str> = input.split_whitespace().collect();
-        if split.is_empty(){
+        if split.is_empty() {
             continue;
         }
         match split[0] {
@@ -269,15 +320,26 @@ async fn main() -> anyhow::Result<()> {
                 - tracert -- traces a route to a node
                 "#);
             }
+            "route" => {
+                let mut rtable = vec![];
+                info!("Route Table:");
+                for (addr, route) in &cs.router.routes {
+                    rtable.push(
+                        format!("{addr} - nh: {}, c: {}, via: {}",
+                                route.next_hop.clone().unwrap_or("?".to_string()),
+                                route.metric,
+                                route.link.unwrap_or(Uuid::nil())
+                        ))
+                }
+            }
             "exit" => {
                 break;
             }
             "ls" => {
                 for (id, net) in &cs.links {
-                    if let Some(health) = os.health.get(id){
+                    if let Some(health) = os.health.get(id) {
                         info!("id: {id}, addr: {}, ping: {:?}", net.neigh_addr, health.ping)
-                    }
-                    else{
+                    } else {
                         info!("id: {id}, addr: {} UNCONNECTED", net.neigh_addr)
                     }
                 }
@@ -288,7 +350,8 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 if let Some((id, link)) = cs.links.iter().find(|(id, _)| id.to_string() == split[1]) {
-                    ping(os.deref_mut(), *id, link.neigh_addr, false).await;
+                    drop(os); // need to drop, otherwise we have a deadlock
+                    ping(op_state.clone(), *id, link.neigh_addr, false).await;
                 } else {
                     warn!("No ")
                 }
@@ -306,10 +369,10 @@ async fn main() -> anyhow::Result<()> {
                     Ok(ip) => {
                         let id = Uuid::new_v4();
                         info!("Sent linking request {id} to {ip}");
-                        os.unlinked.insert(id, NetLink{
+                        os.unlinked.insert(id, NetLink {
                             link: id,
                             neigh_addr: ip,
-                            neigh_node: "UNKNOWN".to_string()
+                            neigh_node: "UNKNOWN".to_string(),
                         });
                         send_packet(ip, LinkRequest {
                             from: cs.router.address.clone(),
@@ -326,25 +389,24 @@ async fn main() -> anyhow::Result<()> {
                 let id = Uuid::parse_str(split[1]);
                 match id {
                     Ok(uuid) => {
-                        if let Some(netlink) = os.link_requests.remove(&uuid){
+                        if let Some(netlink) = os.link_requests.remove(&uuid) {
                             let link_addr = (netlink.link, netlink.neigh_node.clone());
                             cs.router.links.insert(
                                 link_addr.clone(),
-                                Neighbour{
+                                Neighbour {
                                     addr: netlink.neigh_node.clone(),
                                     link: netlink.link,
                                     link_cost: INF,
-                                    routes: HashMap::new()
-                                }
+                                    routes: HashMap::new(),
+                                },
                             );
                             send_packet(netlink.neigh_addr, NetPacket::LinkResponse {
                                 link_id: netlink.link,
-                                node_id: cs.router.address.clone()
+                                node_id: cs.router.address.clone(),
                             });
                             cs.links.insert(netlink.link, netlink);
                             info!("LINKING SUCCESS");
-                        }
-                        else{
+                        } else {
                             error!("No matching linking code found!");
                         }
                     }

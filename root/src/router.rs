@@ -52,6 +52,21 @@ impl<T: RoutingSystem> Router<T> {
             mac_sys: Default::default()
         }
     }
+    
+    /// updates the state of the router, does not broadcast routes
+    pub fn update(&mut self){
+        self.update_routes();
+        self.broadcast_seqno_updates();
+    }
+    /// performs a full update on the state of the router, will broadcast routes to neighbours
+    pub fn full_update(&mut self){
+        self.update_routes();
+        
+        self.solve_starvation();
+        self.broadcast_routes();
+        
+        self.broadcast_seqno_updates();
+    }
 
     // region Interface
     /// writes a packet to the outbound packet queue for all neighbours
