@@ -192,6 +192,23 @@ fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
     send_packets(addr, vec![pkt]);
 }
 
+fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHealth){
+    if let Some(netlink) = cs.links.get(&link){
+        let link_addr = (link, netlink.neigh_node.clone());
+        if let Some(neigh) = cs.router.links.get_mut(&link_addr){
+            neigh.link_cost = {
+                if link_health.ping == Duration::MAX{
+                    INF
+                }
+                else{
+                    link_health.ping.as_millis() as u16
+                }
+            }
+        }
+        cs.router.update();
+    }
+}
+
 async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>, pkt: NetPacket, addr: &Ipv4Addr) -> anyhow::Result<()> {
     let mut cs = state.lock().await;
     let mut os = op_state.lock().await;
@@ -214,6 +231,7 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                 if let Some(health) = os.health.get_mut(&id) {
                     health.last_ping = Instant::now();
                     health.ping = (Instant::now() - health.ping_start) / 2;
+                    update_link_health(cs.deref_mut(), id, health);
                 }
             }
         }
