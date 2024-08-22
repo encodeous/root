@@ -5,6 +5,7 @@ mod packet;
 
 use std::collections::HashMap;
 use std::io::{BufRead, stdin};
+use std::io::ErrorKind::ConnectionRefused;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::str::FromStr;
@@ -117,12 +118,21 @@ async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Op
 
 fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
     tokio::spawn(async move {
-        let stream = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await.unwrap();
-        let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
-        let mut serialized = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
-        for pkt in pkts {
-            serialized.send(pkt).await.unwrap();
-        }
+        let res = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await;
+        match res {
+            Ok(stream) => {
+                let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
+                let mut serialized = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
+                for pkt in pkts {
+                    serialized.send(pkt).await.unwrap();
+                }
+            }
+            Err(err) => {
+                if(err.kind() != ConnectionRefused) {
+                    anyhow::Result::<()>::Err(anyhow!(err)).unwrap();
+                }
+            }
+        };
     });
 }
 
@@ -245,6 +255,7 @@ async fn main() -> anyhow::Result<()> {
                 - dping <link id> -- pings a direct neighbour
                 - link <ip-address> -- set up a link
                 - alink <link-id> -- accepts a link
+                - dlink <link-id> -- deletes a link
                 [routing]
                 - route -- prints whole route table
                 - nh -- gets next hop to node
@@ -260,6 +271,9 @@ async fn main() -> anyhow::Result<()> {
                 for (id, net) in &cs.links {
                     if let Some(health) = os.health.get(id){
                         info!("id: {id}, addr: {}, ping: {:?}", net.neigh_addr, health.ping)
+                    }
+                    else{
+                        info!("id: {id}, addr: {} UNCONNECTED", net.neigh_addr)
                     }
                 }
             }
@@ -323,6 +337,22 @@ async fn main() -> anyhow::Result<()> {
                         else{
                             error!("No matching linking code found!");
                         }
+                    }
+                    Err(_) => {
+                        error!("Invalid UUID")
+                    }
+                }
+            }
+            "dlink" => {
+                if split.len() != 2 {
+                    error!("Expected one argument");
+                    continue;
+                }
+                let id = Uuid::parse_str(split[1]);
+                match id {
+                    Ok(uuid) => {
+                        cs.links.remove(&uuid);
+                        os.health.remove(&uuid);
                     }
                     Err(_) => {
                         error!("Invalid UUID")
