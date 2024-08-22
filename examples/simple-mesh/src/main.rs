@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::str::FromStr;
 use std::sync::{Arc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use futures::{AsyncWriteExt, SinkExt, TryStreamExt};
 use futures::future::err;
@@ -18,7 +18,7 @@ use inquire::error::InquireResult;
 use inquire::InquireError::OperationCanceled;
 use inquire::list_option::ListOption;
 use inquire::validator::Validation;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, set_boxed_logger, set_max_level, warn};
 use netdev::ip::Ipv4Net;
 use serde::de::Unexpected::Str;
 use serde_json::json;
@@ -27,6 +27,7 @@ use tokio::fs;
 use tokio::io::{AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tokio::time::sleep;
 use root::router::{DummyMAC, INF, Router};
 use crate::state::{LinkHealth, OperatingState, PersistentState};
 use crate::routing::IPV4System;
@@ -91,6 +92,25 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
                     }
                 }
             });
+        }
+    }
+}
+
+async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>) -> anyhow::Result<()> {
+    loop {
+        sleep(Duration::from_millis(5000)).await;
+        let mut cs = state.lock().await;
+        let mut os = op_state.lock().await;
+        for (lid, nlink) in &cs.links{
+            os.health.entry(*lid).or_insert(
+                LinkHealth {
+                    ping: Duration::from_millis(100),
+                    ping_start: Instant::now(),
+                    last_ping: Instant::now()
+                }
+            );
+
+            send_packets(nlink.neigh_addr, vec![Ping(*lid, true)]);
         }
     }
 }
@@ -173,11 +193,8 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    CombinedLogger::init(
-        vec![
-            TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)
-        ]
-    ).unwrap();
+    set_max_level(LevelFilter::Info);
+    set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
 
     info!("Starting Root Routing Demo");
     warn!("Notice: THIS DEMO IS NOT DESIGNED FOR SECURITY, AND SHOULD NEVER BE USED OUTSIDE OF A TEST ENVIRONMENT");
@@ -193,7 +210,10 @@ async fn main() -> anyhow::Result<()> {
     let per_state = Arc::new(Mutex::new(saved_state));
     let op_state = Arc::new(Mutex::new(OperatingState::default()));
 
-    let handles = [tokio::spawn(server(per_state.clone(), op_state.clone()))];
+    let handles = [
+        tokio::spawn(server(per_state.clone(), op_state.clone())),
+        tokio::spawn(ping_updater(per_state.clone(), op_state.clone()))
+    ];
 
     // handle I/O
 
