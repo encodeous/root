@@ -96,11 +96,11 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
         let metric = u16::from_str(values[3])?;
         let fd = u16::from_str(values[4])?;
         Ok(Route {
-            source,
+            source: source.clone(),
             metric,
             next_hop: Some(next_hop),
             fd: if fd == INF { None } else { Some(fd) },
-            link: Some(1),
+            link: Some(next_hop),
         })
     } else {
         // self route
@@ -222,11 +222,11 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
                 router: Router::new(*node),
             };
             for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
-                sys.router.links.insert((1, *neigh), Neighbour{
+                sys.router.links.insert(*neigh, Neighbour{
                     link_cost: *metric,
                     addr: *neigh,
                     routes: HashMap::new(),
-                    link: 1
+                    link: *neigh
                 });
             }
             nodes.push(sys);
@@ -351,15 +351,16 @@ pub fn save(state: &State) -> Yaml {
         );
 
         // calculate neighbours
-        for ((_link, n_addr), neigh) in &node.router.links {
-            if !pairs.contains(&(addr, *n_addr)) {
-                pairs.insert((addr, *n_addr));
-                pairs.insert((*n_addr, addr));
+        for (link, neigh) in &node.router.links {
+            let n_addr = neigh.addr;
+            if !pairs.contains(&(addr, n_addr)) {
+                pairs.insert((addr, n_addr));
+                pairs.insert((n_addr, addr));
                 neighbours.push(Yaml::from_str(
                     format!(
                         "{} {} {}",
                         addr,
-                        *n_addr,
+                        n_addr,
                         neigh.link_cost
                     )
                         .as_str(),

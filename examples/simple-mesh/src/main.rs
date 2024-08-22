@@ -39,7 +39,6 @@ use tokio_serde::{Serializer, Deserializer, Framed, SymmetricallyFramed};
 use tokio_serde::formats::SymmetricalJson;
 use uuid::{Error, Uuid};
 use root::concepts::neighbour::Neighbour;
-use root::framework::LinkAddress;
 use crate::link::NetLink;
 use crate::packet::NetPacket;
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong};
@@ -144,17 +143,17 @@ async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()>
 fn send_outbound(cs: &mut PersistentState) {
     let mut dsts = HashMap::new();
     for pkt in cs.router.outbound_packets.drain(..) {
-        let entry = dsts.entry(pkt.link_addr.clone()).or_insert_with(|| {
+        let entry = dsts.entry(pkt.link).or_insert_with(|| {
             vec![]
         });
         entry.push(NetPacket::Routing {
-            link_id: pkt.link_addr.0,
+            link_id: pkt.link,
             data: pkt.packet.data,
         });
     }
 
     for (dst, data) in dsts {
-        if let Some(netaddr) = cs.links.get(&dst.0) {
+        if let Some(netaddr) = cs.links.get(&dst) {
             send_packets(netaddr.neigh_addr, data);
         }
     }
@@ -195,8 +194,7 @@ fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
 
 fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHealth){
     if let Some(netlink) = cs.links.get(&link){
-        let link_addr = (link, netlink.neigh_node.clone());
-        if let Some(neigh) = cs.router.links.get_mut(&link_addr){
+        if let Some(neigh) = cs.router.links.get_mut(&link){
             neigh.link_cost = {
                 if link_health.ping == Duration::MAX{
                     INF
@@ -238,9 +236,9 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         }
         NetPacket::Routing { link_id, data } => {
             if let Some(link) = cs.links.get(&link_id) {
-                let link_addr = (link.link, link.neigh_node.clone());
                 info!("Routing Packet: {}", json!(data));
-                cs.router.handle_packet(&DummyMAC::from(data), &link_addr);
+                let n_nid = link.neigh_node.clone();
+                cs.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid);
                 cs.router.update();
                 send_outbound(cs.deref_mut());
             }
@@ -257,9 +255,8 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
             info!("LINKING SUCCESS: {node_id} has accepted the link {link_id}.");
             if let Some(mut net_link) = os.unlinked.remove(&link_id) {
                 net_link.neigh_node = node_id.clone();
-                let link = (link_id, node_id.clone());
                 cs.router.links.insert(
-                    link.clone(),
+                    link_id,
                     Neighbour {
                         addr: node_id.clone(),
                         link: link_id,
@@ -411,9 +408,8 @@ async fn main() -> anyhow::Result<()> {
                 match id {
                     Ok(uuid) => {
                         if let Some(netlink) = os.link_requests.remove(&uuid) {
-                            let link_addr = (netlink.link, netlink.neigh_node.clone());
                             cs.router.links.insert(
-                                link_addr.clone(),
+                                netlink.link,
                                 Neighbour {
                                     addr: netlink.neigh_node.clone(),
                                     link: netlink.link,

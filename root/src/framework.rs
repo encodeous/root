@@ -10,6 +10,7 @@ pub trait RoutingSystem {
     /// Address of the node on the routing network, MUST be globally unique
     type NodeAddress: Ord + PartialOrd + RootData + RootKey;
     /// A type that describes a physical interface or higher level concept that allows this node to talk to another node via some method
+    /// Must be unique
     type Link: RootKey + RootData;
     /// An opaque implementation that allows the node to sign packets
     type MACSystem: MACSystem<Self>;
@@ -35,7 +36,6 @@ pub trait MACSystem<T: RoutingSystem + ?Sized>: Default {
     fn validate<V: RootData>(&self, sig: &MAC<V, T>, subject: &T::NodeAddress) -> bool;
 }
 pub type MAC<V, T> = <<T as RoutingSystem>::MACSystem as MACSystem<T>>::MACSignatureType<V>;
-pub type LinkAddress<T> = (<T as RoutingSystem>::Link, <T as RoutingSystem>::NodeAddress);
 
 /// Appendix B. Protocol Parameters
 pub struct ProtocolParams {

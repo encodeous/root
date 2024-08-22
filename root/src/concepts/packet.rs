@@ -1,7 +1,7 @@
 use educe::Educe;
 use serde::{Deserialize, Serialize};
 use crate::concepts::route::Source;
-use crate::framework::{LinkAddress, MAC, RoutingSystem};
+use crate::framework::{MAC, RoutingSystem};
 
 #[derive(Serialize, Deserialize, Educe)]
 #[educe(Clone(bound()))]
@@ -33,6 +33,7 @@ pub struct RouteUpdate<T: RoutingSystem + ?Sized> {
 #[educe(Clone(bound()))]
 pub struct OutboundPacket<T: RoutingSystem + ?Sized> {
     /// send via this link
-    pub link_addr: LinkAddress<T>,
+    pub link: T::Link,
+    pub dest: T::NodeAddress,
     pub packet: MAC<Packet<T>, T>,
 }
