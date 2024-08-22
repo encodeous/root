@@ -101,7 +101,7 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
 async fn ping(os: &mut OperatingState, id: Uuid, addr: Ipv4Addr, silent: bool){
     let entry = os.health.entry(id).or_insert(
         LinkHealth {
-            ping: Duration::from_millis(100),
+            ping: Duration::MAX,
             ping_start: Instant::now(),
             last_ping: Instant::now()
         }
@@ -306,6 +306,11 @@ async fn main() -> anyhow::Result<()> {
                     Ok(ip) => {
                         let id = Uuid::new_v4();
                         info!("Sent linking request {id} to {ip}");
+                        os.unlinked.insert(id, NetLink{
+                            link: id,
+                            neigh_addr: ip,
+                            neigh_node: "UNKNOWN".to_string()
+                        });
                         send_packet(ip, LinkRequest {
                             from: cs.router.address.clone(),
                             link_id: id,
