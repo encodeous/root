@@ -98,7 +98,7 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
     }
 }
 
-async fn ping(op_state: Arc<Mutex<OperatingState>>, id: Uuid, addr: Ipv4Addr, silent: bool) {
+async fn ping(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>, id: Uuid, addr: Ipv4Addr, silent: bool) {
     {
         let mut os = op_state.lock().await;
         let entry = os.health.entry(id).or_insert(
@@ -111,11 +111,13 @@ async fn ping(op_state: Arc<Mutex<OperatingState>>, id: Uuid, addr: Ipv4Addr, si
         entry.ping_start = Instant::now();
     }
     tokio::spawn(async move {
-        if let Err(_) = send_packets_wait(addr, vec![Ping(id, silent)]).await {
+        if (send_packets_wait(addr, vec![Ping(id, silent)]).await).is_err() {
             let mut os = op_state.lock().await;
-            os.health.entry(id).and_modify(|x| {
-                x.ping = Duration::MAX
-            });
+            let mut cs = state.lock().await;
+            if let Some(x) = os.health.get_mut(&id){
+                x.ping = Duration::MAX;
+                update_link_health(cs.deref_mut(), id, x);
+            }
         }
     });
 }
@@ -125,7 +127,7 @@ async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Op
         sleep(Duration::from_millis(5000)).await;
         let mut cs = state.lock().await;
         for (lid, nlink) in &cs.links {
-            ping(op_state.clone(), *lid, nlink.neigh_addr, true).await;
+            ping(state.clone(), op_state.clone(), *lid, nlink.neigh_addr, true).await;
         }
     }
 }
@@ -193,19 +195,17 @@ fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
 }
 
 fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHealth){
-    if let Some(netlink) = cs.links.get(&link){
-        if let Some(neigh) = cs.router.links.get_mut(&link){
-            neigh.link_cost = {
-                if link_health.ping == Duration::MAX{
-                    INF
-                }
-                else{
-                    link_health.ping.as_millis() as u16
-                }
+    if let Some(neigh) = cs.router.links.get_mut(&link){
+        neigh.link_cost = {
+            if link_health.ping == Duration::MAX{
+                INF
+            }
+            else{
+                link_health.ping.as_millis() as u16
             }
         }
-        cs.router.update();
     }
+    cs.router.update();
 }
 
 async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>, pkt: NetPacket, addr: &Ipv4Addr) -> anyhow::Result<()> {
@@ -368,8 +368,7 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 if let Some((id, link)) = cs.links.iter().find(|(id, _)| id.to_string() == split[1]) {
-                    drop(os); // need to drop, otherwise we have a deadlock
-                    ping(op_state.clone(), *id, link.neigh_addr, false).await;
+                    ping(per_state.clone(), op_state.clone(), *id, link.neigh_addr, false).await;
                 } else {
                     warn!("No ")
                 }

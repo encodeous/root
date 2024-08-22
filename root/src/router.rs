@@ -421,14 +421,19 @@ impl<T: RoutingSystem> Router<T> {
             // update the value
             if let Some(entry) = neighbour.routes.get_mut(addr) { // neighbour entry exists!
                 entry.source = update.source.clone();
-                if update.metric == INF && entry.metric != INF && selected {
-                    // this is a retraction!
-                    if action != NoAction {
-                        error!("Unexpected state: A seqno increase should not have a metric of INF!")
+                if update.metric == INF { // validate retraction
+                    if entry.metric != INF && selected{
+                        // the route is our immediate next route, we need to handle this retraction
+                        if action != NoAction {
+                            error!("Unexpected state: A seqno increase should not have a metric of INF!")
+                        }
+                        action = Retraction;
+                        entry.metric = update.metric;
                     }
-                    action = Retraction;
                 }
-                entry.metric = update.metric;
+                else{
+                    entry.metric = update.metric;
+                }
             } else if update.metric != INF || selected {
                 // we add the route if it is not INF, and it is not the next hop
                 let route = Route {
