@@ -4,6 +4,7 @@ mod state;
 mod packet;
 
 use std::collections::HashMap;
+use std::io::{BufRead, stdin};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::str::FromStr;
@@ -23,7 +24,7 @@ use serde::de::Unexpected::Str;
 use serde_json::json;
 use simplelog::*;
 use tokio::fs;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use root::router::{DummyMAC, INF, Router};
@@ -198,25 +199,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Type \"help\" for help");
 
-    loop {
-        let input = match prompt_text("")
-        {
-            Ok(x) => {
-                Ok(x)
-            }
-            Err(c_err) => {
-                match &c_err {
-                    OperationCanceled => {
-                        break;
-                    }
-                    InquireError::OperationInterrupted => {
-                        break;
-                    }
-                    _ => {}
-                }
+    let iter = stdin().lock().lines();
+    for line in iter{
+        let input = match line {
+            Ok(x) => {Ok(x)}
+            Err(err) => {
                 let cs = per_state.lock().await;
                 save_state(&cs).await?;
-                Err(c_err)
+                Err(err)
             }
         }?;
         let mut cs = per_state.lock().await;
