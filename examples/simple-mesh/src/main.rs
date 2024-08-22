@@ -135,6 +135,7 @@ async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()>
         sleep(Duration::from_millis(5000)).await;
         let mut cs = state.lock().await;
         cs.router.full_update();
+        send_outbound(cs.deref_mut());
 
         save_state(&cs).await?;
     }
@@ -343,10 +344,11 @@ async fn main() -> anyhow::Result<()> {
                 info!("Route Table:");
                 for (addr, route) in &cs.router.routes {
                     rtable.push(
-                        format!("{addr} - nh: {}, c: {}, via: {}",
+                        format!("{addr} - nh: {}, c: {}, via: {}, seq: {}",
                                 route.next_hop.clone().unwrap_or("?".to_string()),
                                 route.metric,
-                                route.link.unwrap_or(Uuid::nil())
+                                route.link.unwrap_or(Uuid::nil()),
+                                route.source.data.seqno
                         ))
                 }
                 info!("{}", rtable.join("\n"));

@@ -52,7 +52,7 @@ impl<T: RoutingSystem> Router<T> {
             mac_sys: Default::default()
         }
     }
-    
+
     /// updates the state of the router, does not broadcast routes
     pub fn update(&mut self){
         self.update_routes();
@@ -61,10 +61,10 @@ impl<T: RoutingSystem> Router<T> {
     /// performs a full update on the state of the router, will broadcast routes to neighbours
     pub fn full_update(&mut self){
         self.update_routes();
-        
+
         self.solve_starvation();
         self.broadcast_routes();
-        
+
         self.broadcast_seqno_updates();
     }
 
@@ -321,7 +321,7 @@ impl<T: RoutingSystem> Router<T> {
             }
             Packet::BatchRouteUpdate { routes } => {
                 for route in routes {
-                    self.handle_neighbour_route_update(route, link_addr);
+                    self.handle_neighbour_route_update(route, link_addr); // we dont need to worry about seqno updates and retractions
                 }
             }
             Packet::SeqnoRequest { source, seqno } => {
@@ -385,6 +385,11 @@ impl<T: RoutingSystem> Router<T> {
         let Source { addr, seqno } = update.source.data();
         let (link , neigh) = link_addr;
 
+        if *addr == self.address{
+            // just ignore this
+            return NoAction;
+        }
+        
         // validate update
         if !self.mac_sys.validate(&update.source, addr) {
             error!(
@@ -401,7 +406,7 @@ impl<T: RoutingSystem> Router<T> {
             if seqno_less_than(*seqno, d_seqno) {
                 return NoAction; // our neighbour is probably out of date. seqno cannot decrease
             } else if seqno_less_than(d_seqno, *seqno) {
-                action = SeqnoUpdate;
+                action = SeqnoUpdate; // our neighbour has a higher seqno than us!
             }
         }
         
@@ -415,9 +420,8 @@ impl<T: RoutingSystem> Router<T> {
 
         if let Some(neighbour) = self.links.get_mut(&(link.clone(), neigh.clone())) {
             // update the value
-            if let Some(entry) = neighbour.routes.get_mut(addr) {
+            if let Some(entry) = neighbour.routes.get_mut(addr) { // neighbour entry exists!
                 entry.source = update.source.clone();
-                entry.metric = update.metric;
                 if update.metric == INF && entry.metric != INF {
                     // this is a retraction!
                     if action != NoAction {
@@ -425,6 +429,7 @@ impl<T: RoutingSystem> Router<T> {
                     }
                     action = Retraction;
                 }
+                entry.metric = update.metric;
             } else if update.metric != INF || selected {
                 // we add the route if it is not INF, and it is not the next hop
                 let route = Route {
