@@ -331,6 +331,7 @@ async fn main() -> anyhow::Result<()> {
                                 route.link.unwrap_or(Uuid::nil())
                         ))
                 }
+                info!("{}", rtable.join("\n"));
             }
             "exit" => {
                 break;
