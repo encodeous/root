@@ -128,9 +128,11 @@ async fn ping(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingS
 async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
-        let mut cs = state.lock().await;
-        for (lid, nlink) in &cs.links {
-            ping(state.clone(), op_state.clone(), *lid, nlink.neigh_addr, true).await;
+        let cs = state.lock().await;
+        let links = cs.links.clone();
+        drop(cs);
+        for (lid, nlink) in links{
+            ping(state.clone(), op_state.clone(), lid, nlink.neigh_addr, true).await;
         }
     }
 }
@@ -626,7 +628,11 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 }
                 if let Some((id, link)) = cs.links.iter().find(|(id, _)| id.to_string() == split[1]) {
-                    ping(per_state.clone(), op_state.clone(), *id, link.neigh_addr, false).await;
+                    drop(os);
+                    let laddr = link.neigh_addr;
+                    let id = *id;
+                    drop(cs);
+                    ping(per_state.clone(), op_state.clone(), id, laddr, false).await;
                 } else {
                     warn!("No ")
                 }
