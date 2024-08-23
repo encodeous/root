@@ -550,8 +550,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             "msg" => {
-                if split.len() != 2 {
-                    error!("Expected at least arguments");
+                if split.len() <= 2 {
+                    error!("Expected at least two arguments");
                     continue;
                 }
                 let node = split[1];
