@@ -17,7 +17,7 @@ pub const INF: u16 = 0xFFFF;
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct Router<T: RoutingSystem + ?Sized> {
-    #[serde_as(as = "Vec<(_, _)>")]
+    #[serde(skip_serializing, skip_deserializing)]
     pub links: HashMap<T::Link, Neighbour<T>>,
     /// Source, Route
     /// #[serde_as(as = "Vec<(_, _)>")]

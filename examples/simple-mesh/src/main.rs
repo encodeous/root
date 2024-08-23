@@ -521,11 +521,23 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting Root Routing Demo");
     warn!("Notice: THIS DEMO IS NOT DESIGNED FOR SECURITY, AND SHOULD NEVER BE USED OUTSIDE OF A TEST ENVIRONMENT");
 
-    let saved_state = if let Ok(file) = fs::read_to_string("./config.json").await {
+    let mut saved_state = if let Ok(file) = fs::read_to_string("./config.json").await {
         serde_json::from_str(&file)?
     } else {
         setup().await?
     };
+    
+    for (link, netlink) in &saved_state.links{
+        saved_state.router.links.insert(
+            *link,
+            Neighbour {
+                addr: netlink.neigh_node.clone(),
+                link: netlink.link,
+                link_cost: INF,
+                routes: HashMap::new(),
+            },
+        );
+    }
 
     let ss = SyncState{
         ps: saved_state,
