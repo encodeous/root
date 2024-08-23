@@ -341,6 +341,10 @@ impl<T: RoutingSystem> Router<T> {
                     } else if self.address == *source {
                         // we are the intended recipient, so we can broadcast this!
                         increment(&mut self.seqno);
+                        if seqno_less_than(self.seqno, cur_seqno){
+                            self.seqno = cur_seqno; // did our node go to sleep? we have less seqno than what others are requesting.
+                            // MAKE SURE TO ENABLE MAC IN PROD
+                        }
                         self.broadcast_route_for.insert(self.address.clone());
                     } else {
                         let req_seqno = self.seqno_requests.entry(source.clone()).or_insert(0);
