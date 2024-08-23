@@ -12,8 +12,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::ops::DerefMut;
 use std::str::FromStr;
-use std::sync::{Arc, mpsc, OnceLock};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use futures::{AsyncWriteExt, SinkExt, TryStreamExt};
@@ -31,6 +30,7 @@ use simplelog::*;
 use tokio::fs;
 use tokio::io::{AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use root::router::{DummyMAC, INF, Router};
@@ -45,8 +45,6 @@ use root::framework::RoutingSystem;
 use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
-
-static PACKET_QUEUE: std::sync::Mutex<Option<Sender<(Ipv4Addr, NetPacket)>>> = std::sync::Mutex::new(None);
 
 async fn save_state(cfg: &PersistentState) -> anyhow::Result<()> {
     fs::write("./config.json", serde_json::to_vec(cfg)?).await?;
@@ -136,63 +134,81 @@ async fn ping_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Op
         }
     }
 }
-async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()> {
+async fn route_updater(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
         let mut cs = state.lock().await;
         cs.router.full_update();
-        send_outbound(cs.deref_mut());
-
+        drop(cs);
+        send_outbound(state.clone(), op_state.clone()).await?;
+        let cs = state.lock().await;
         save_state(&cs).await?;
     }
 }
-async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<()> {
+async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<()> {
     let mut connections: HashMap<Ipv4Addr, Framed<FramedWrite<TcpStream, LengthDelimitedCodec>, NetPacket, NetPacket, Json<NetPacket, NetPacket>>> = HashMap::new();
     let mut next_retry = HashMap::new();
-    for (dst, pkt) in recv{
-        if let std::collections::hash_map::Entry::Vacant(e) = connections.entry(dst) {
-            if let Some(time) = next_retry.get(&dst) {
-                if *time > Instant::now(){
-                    continue; // dont want to overload anything
+    let mut dirty = HashSet::new();
+    let mut buf = Vec::new();
+    loop {
+        recv.recv_many(&mut buf, 1000).await;
+        for (dst, pkt) in buf.drain(..){
+            if let std::collections::hash_map::Entry::Vacant(e) = connections.entry(dst) {
+                if let Some(time) = next_retry.get(&dst) {
+                    if *time > Instant::now(){
+                        continue; // dont want to overload anything
+                    }
                 }
+                let res = TcpStream::connect(SocketAddrV4::new(dst, 9988)).await;
+                match res {
+                    Ok(stream) => {
+                        let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
+                        let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
+                        e.insert(symm);
+                    }
+                    Err(_) => {
+                        next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
+                        continue;
+                    }
+                };
             }
-            let res = TcpStream::connect(SocketAddrV4::new(dst, 9988)).await;
-            match res {
-                Ok(stream) => {
-                    let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
-                    let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
-                    e.insert(symm);
-                }
-                Err(_) => {
-                    next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
-                    continue;
-                }
-            };
+
+            let mut remove = false;
+
+            if let Some(conn) = connections.get_mut(&dst){
+                remove = conn.send(pkt).await.is_err();
+                dirty.insert(dst);
+            }
+
+            if remove{
+                connections.remove(&dst);
+            }
         }
-
-        let mut remove = false;
-
-        if let Some(conn) = connections.get_mut(&dst){
-            remove = conn.send(pkt).await.is_err();
-            remove = remove || conn.flush().await.is_err();
-        }
-
-        if remove{
-            connections.remove(&dst);
+        for ip in dirty.drain(){
+            let mut remove = false;
+            if let Some(conn) = connections.get_mut(&ip){
+                remove = conn.flush().await.is_err();
+            }
+            if remove{
+                connections.remove(&ip);
+            }
         }
     }
     Ok(())
 }
 
-fn send_outbound(cs: &mut PersistentState) {
-    for pkt in cs.router.outbound_packets.drain(..) {
+async fn send_outbound(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<OperatingState>>,) -> anyhow::Result<()> {
+    let mut cs = state.lock().await;
+    for pkt in &cs.router.outbound_packets {
         if let Some(netaddr) = cs.links.get(&pkt.link) {
-            send_packet(netaddr.neigh_addr, NetPacket::Routing {
+            send_packet(op_state.clone(), netaddr.neigh_addr, NetPacket::Routing {
                 link_id: pkt.link,
-                data: pkt.packet.data,
-            });
+                data: pkt.packet.data.clone(),
+            }).await?;
         }
     }
+    cs.router.outbound_packets.clear();
+    Ok(())
 }
 async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Result<()> {
     let stream = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await?;
@@ -204,11 +220,12 @@ async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Resu
     Ok(())
 }
 
-fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
-    let mut x = PACKET_QUEUE.lock().unwrap();
-    if let Some(sender) = x.deref_mut() {
-        sender.send((addr, pkt)).unwrap()
+async fn send_packet(op_state: Arc<Mutex<OperatingState>>, addr: Ipv4Addr, pkt: NetPacket) -> anyhow::Result<()> {
+    let mut os = op_state.lock().await;
+    if let Some(sender) = &os.packet_queue {
+        sender.send((addr, pkt)).await?;
     }
+    Ok(())
 }
 
 fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHealth){
@@ -233,7 +250,8 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         Ping(id, silent) => {
             if let Some(link) = cs.links.get(&id) {
                 debug!("Ping received from {} nid: {}", link.neigh_addr, link.neigh_node);
-                send_packet(link.neigh_addr, Pong(id, silent));
+                drop(os);
+                send_packet(op_state, link.neigh_addr, Pong(id, silent)).await?;
             }
         }
         Pong(id, silent) => {
@@ -259,7 +277,9 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                 let n_nid = link.neigh_node.clone();
                 cs.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid);
                 cs.router.update();
-                send_outbound(cs.deref_mut());
+                drop(os);
+                drop(cs);
+                send_outbound(state, op_state).await?;
             }
         }
         LinkRequest { link_id, from } => {
@@ -313,10 +333,11 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                         // forward packet
                         if let Some(link) = route.link{
                             if let Some(netlink) = cs.links.get(&link){
-                                send_packet(netlink.neigh_addr, NetPacket::Undeliverable {
+                                drop(os);
+                                send_packet(op_state, netlink.neigh_addr, NetPacket::Undeliverable {
                                     dst_id,
                                     sender_id
-                                });
+                                }).await?;
                             }
                         }
                     }
@@ -343,11 +364,12 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                         // forward packet
                         if let Some(link) = route.link{
                             if let Some(netlink) = cs.links.get(&link){
-                                send_packet(netlink.neigh_addr, NetPacket::TraceRoute {
+                                drop(os);
+                                send_packet(op_state.clone(), netlink.neigh_addr, NetPacket::TraceRoute {
                                     dst_id,
                                     sender_id,
                                     path
-                                });
+                                }).await?;
                             }
                         }
                     }
@@ -398,10 +420,11 @@ async fn route_packet(
                 // forward packet
                 if let Some(link) = route.link{
                     if let Some(netlink) = cs.links.get(&link){
-                        send_packet(netlink.neigh_addr, NetPacket::Deliver {
+                        drop(os);
+                        send_packet(op_state, netlink.neigh_addr, NetPacket::Deliver {
                             dst_id,
                             sender_id, data
-                        });
+                        }).await?;
                         return Ok(())
                     }
                 }
@@ -409,10 +432,11 @@ async fn route_packet(
         }
         // undeliverable
         if let Some(addr) = prev_hop{
-            send_packet(addr, NetPacket::Undeliverable {
+            drop(os);
+            send_packet(op_state, addr, NetPacket::Undeliverable {
                 dst_id,
                 sender_id
-            });
+            }).await?;
         }
     }
     Ok(())
@@ -453,12 +477,7 @@ async fn main() -> anyhow::Result<()> {
     set_max_level(LevelFilter::Info);
     set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
 
-    let (sender, recv) = mpsc::channel();
-
-    {
-        let mut mtx = PACKET_QUEUE.lock().unwrap();
-        *mtx = Some(sender);
-    }
+    let (sender, recv) = tokio::sync::mpsc::channel(1000);
 
     info!("Starting Root Routing Demo");
     warn!("Notice: THIS DEMO IS NOT DESIGNED FOR SECURITY, AND SHOULD NEVER BE USED OUTSIDE OF A TEST ENVIRONMENT");
@@ -472,12 +491,14 @@ async fn main() -> anyhow::Result<()> {
     save_state(&saved_state).await?;
 
     let per_state = Arc::new(Mutex::new(saved_state));
-    let op_state = Arc::new(Mutex::new(OperatingState::default()));
+    let mut os = OperatingState::default();
+    os.packet_queue = Some(sender);
+    let op_state = Arc::new(Mutex::new(os));
 
     let handles = [
         tokio::spawn(server(per_state.clone(), op_state.clone())),
         tokio::spawn(ping_updater(per_state.clone(), op_state.clone())),
-        tokio::spawn(route_updater(per_state.clone())),
+        tokio::spawn(route_updater(per_state.clone(), op_state.clone())),
         tokio::spawn(packet_sender(recv)),
     ];
 
@@ -569,11 +590,12 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(nh) = cs.router.routes.get(node){
                     if let Some(link) = nh.link{
                         if let Some(netlink) = cs.links.get(&link){
-                            send_packet(netlink.neigh_addr, TraceRoute {
+                            drop(os);
+                            send_packet(op_state.clone(), netlink.neigh_addr, TraceRoute {
                                 path: vec![],
                                 dst_id: node.to_string(),
                                 sender_id: cs.router.address.clone()
-                            })
+                            }).await?;
                         }
                     }
                 }
@@ -627,10 +649,11 @@ async fn main() -> anyhow::Result<()> {
                             neigh_addr: ip,
                             neigh_node: "UNKNOWN".to_string(),
                         });
-                        send_packet(ip, LinkRequest {
+                        drop(os);
+                        send_packet(op_state.clone(), ip, LinkRequest {
                             from: cs.router.address.clone(),
                             link_id: id,
-                        })
+                        }).await?;
                     }
                 }
             }
@@ -649,10 +672,11 @@ async fn main() -> anyhow::Result<()> {
                             routes: HashMap::new(),
                         },
                     );
-                    send_packet(netlink.neigh_addr, NetPacket::LinkResponse {
+                    drop(os);
+                    send_packet(op_state.clone(), netlink.neigh_addr, NetPacket::LinkResponse {
                         link_id: netlink.link,
                         node_id: cs.router.address.clone(),
-                    });
+                    }).await?;
                     cs.links.insert(netlink.link, netlink);
                     info!("LINKING SUCCESS");
                 } else {
