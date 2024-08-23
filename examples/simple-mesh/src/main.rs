@@ -3,6 +3,7 @@ mod routing;
 mod state;
 mod packet;
 
+use std::cmp::max;
 use std::collections::HashMap;
 use std::fmt::format;
 use std::io::{BufRead, stdin};

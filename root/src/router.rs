@@ -4,7 +4,7 @@ use crate::concepts::route::{Route, Source};
 use crate::framework::{MAC, MACSignature, MACSystem, RootData, RoutingSystem};
 use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
 use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
-use log::{error};
+use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -155,10 +155,15 @@ impl<T: RoutingSystem> Router<T> {
                 }
             }
         }
-        for (link, neigh) in &self.links {
+        for (link, neigh) in &mut self.links {
             for (src, neigh_route) in &neigh.routes {
                 if *src == self.address{
                     continue; // we can safely ignore a route to ourself
+                }
+                
+                if neigh.link_cost == 0{
+                    warn!("Metric over link {} to {} should not be 0, this has been corrected", json!(neigh.link), json!(neigh.addr));
+                    neigh.link_cost = 1;
                 }
 
                 let metric = sum_inf(neigh.link_cost, neigh_route.metric);
