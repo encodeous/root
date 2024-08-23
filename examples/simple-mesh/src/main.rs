@@ -222,6 +222,9 @@ async fn send_outbound(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
             }).await?;
             debug!("[SP] sent packet to {netaddr}");
         }
+        else{
+            debug!("[SP] ?? why wasn't this sent {}", json!(pkt));
+        }
     }
     Ok(())
 }
