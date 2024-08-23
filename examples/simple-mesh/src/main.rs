@@ -46,6 +46,7 @@ async fn save_state(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         serde_json::to_vec(&ml!(state).ps)?
     };
     fs::write("./config.json", content).await?;
+    debug!("Saved State");
     Ok(())
 }
 
@@ -142,8 +143,10 @@ async fn route_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         {
             let mut ss = state.lock().unwrap();
             ss.ps.router.full_update();
+            debug!("[RR] finished performing full update");
         }
         send_outbound(state.clone()).await?;
+        debug!("[RR] sent outbound packets");
         save_state(state.clone()).await?;
         debug!("Done updating routes");
     }
