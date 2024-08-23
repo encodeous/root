@@ -8,5 +8,5 @@ use crate::routing::IPV4System;
 pub struct NetLink {
     pub link: <IPV4System as RoutingSystem>::Link,
     pub neigh_node: <IPV4System as RoutingSystem>::NodeAddress,
-    pub neigh_addr: Ipv4Addr,
+    pub neigh_addr: Ipv4Addr
 }

@@ -12,7 +12,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::ops::DerefMut;
 use std::str::FromStr;
-use std::sync::{Arc};
+use std::sync::{Arc, mpsc, OnceLock};
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use futures::{AsyncWriteExt, SinkExt, TryStreamExt};
@@ -37,13 +38,15 @@ use crate::state::{LinkHealth, OperatingState, PersistentState};
 use crate::routing::IPV4System;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tokio_serde::{Serializer, Deserializer, Framed, SymmetricallyFramed};
-use tokio_serde::formats::SymmetricalJson;
+use tokio_serde::formats::{Json, SymmetricalJson};
 use uuid::{Error, Uuid};
 use root::concepts::neighbour::Neighbour;
 use root::framework::RoutingSystem;
 use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
+
+static PACKET_QUEUE: std::sync::Mutex<Option<Sender<(Ipv4Addr, NetPacket)>>> = std::sync::Mutex::new(None);
 
 async fn save_state(cfg: &PersistentState) -> anyhow::Result<()> {
     fs::write("./config.json", serde_json::to_vec(cfg)?).await?;
@@ -143,26 +146,6 @@ async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()>
         save_state(&cs).await?;
     }
 }
-
-fn send_outbound(cs: &mut PersistentState) {
-    let mut dsts = HashMap::new();
-    for pkt in cs.router.outbound_packets.drain(..) {
-        let entry = dsts.entry(pkt.link).or_insert_with(|| {
-            vec![]
-        });
-        entry.push(NetPacket::Routing {
-            link_id: pkt.link,
-            data: pkt.packet.data,
-        });
-    }
-
-    for (dst, data) in dsts {
-        if let Some(netaddr) = cs.links.get(&dst) {
-            send_packets(netaddr.neigh_addr, data);
-        }
-    }
-}
-
 fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
     tokio::spawn(async move {
         let res = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await;
@@ -182,6 +165,53 @@ fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
         };
     });
 }
+async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<()> {
+    let mut connections: HashMap<Ipv4Addr, Framed<FramedWrite<TcpStream, LengthDelimitedCodec>, NetPacket, NetPacket, Json<NetPacket, NetPacket>>> = HashMap::new();
+    let mut next_retry = HashMap::new();
+    for (dst, pkt) in recv{
+        if let std::collections::hash_map::Entry::Vacant(e) = connections.entry(dst) {
+            if let Some(time) = next_retry.get(&dst) {
+                if *time > Instant::now(){
+                    continue; // dont want to overload anything
+                }
+            }
+            let res = TcpStream::connect(SocketAddrV4::new(dst, 9988)).await;
+            match res {
+                Ok(stream) => {
+                    let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
+                    let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
+                    e.insert(symm);
+                }
+                Err(err) => {
+                    next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
+                    continue;
+                }
+            };
+        }
+
+        let mut remove = false;
+
+        if let Some(conn) = connections.get_mut(&dst){
+            remove = conn.send(pkt).await.is_ok();
+        }
+
+        if remove{
+            connections.remove(&dst);
+        }
+    }
+    Ok(())
+}
+
+fn send_outbound(cs: &mut PersistentState) {
+    for pkt in cs.router.outbound_packets.drain(..) {
+        if let Some(netaddr) = cs.links.get(&pkt.link) {
+            send_packet(netaddr.neigh_addr, NetPacket::Routing {
+                link_id: pkt.link,
+                data: pkt.packet.data,
+            });
+        }
+    }
+}
 async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Result<()> {
     let stream = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await?;
     let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
@@ -193,7 +223,10 @@ async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Resu
 }
 
 fn send_packet(addr: Ipv4Addr, pkt: NetPacket) {
-    send_packets(addr, vec![pkt]);
+    let mut x = PACKET_QUEUE.lock().unwrap();
+    if let Some(sender) = x.deref_mut() {
+        sender.send((addr, pkt)).unwrap()
+    }
 }
 
 fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHealth){
@@ -218,7 +251,7 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         Ping(id, silent) => {
             if let Some(link) = cs.links.get(&id) {
                 debug!("Ping received from {} nid: {}", link.neigh_addr, link.neigh_node);
-                send_packets(link.neigh_addr, vec![Pong(id, silent)]);
+                send_packet(link.neigh_addr, Pong(id, silent));
             }
         }
         Pong(id, silent) => {
@@ -438,6 +471,13 @@ async fn main() -> anyhow::Result<()> {
     set_max_level(LevelFilter::Info);
     set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
 
+    let (sender, recv) = mpsc::channel();
+
+    {
+        let mut mtx = PACKET_QUEUE.lock().unwrap();
+        *mtx = Some(sender);
+    }
+
     info!("Starting Root Routing Demo");
     warn!("Notice: THIS DEMO IS NOT DESIGNED FOR SECURITY, AND SHOULD NEVER BE USED OUTSIDE OF A TEST ENVIRONMENT");
 
@@ -455,7 +495,8 @@ async fn main() -> anyhow::Result<()> {
     let handles = [
         tokio::spawn(server(per_state.clone(), op_state.clone())),
         tokio::spawn(ping_updater(per_state.clone(), op_state.clone())),
-        tokio::spawn(route_updater(per_state.clone()))
+        tokio::spawn(route_updater(per_state.clone())),
+        tokio::spawn(packet_sender(recv)),
     ];
 
     // handle I/O
