@@ -151,7 +151,10 @@ impl<T: RoutingSystem> Router<T> {
                 // check if link still exists
                 if !self.links.contains_key(link){
                     route.metric = INF;
-                    retractions.push(route.source.clone());
+                    if !route.retracted{
+                        retractions.push(route.source.clone());
+                    }
+                    route.retracted = true;
                 }
             }
         }
