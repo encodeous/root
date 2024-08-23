@@ -515,8 +515,8 @@ async fn handle_routed_packet(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    set_max_level(LevelFilter::Debug);
-    set_boxed_logger(TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
+    set_max_level(LevelFilter::Info);
+    set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
 
     let (sender, recv) = tokio::sync::mpsc::channel(1000);
 
