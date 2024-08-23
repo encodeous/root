@@ -493,7 +493,7 @@ async fn main() -> anyhow::Result<()> {
                 - route -- prints whole route table
                 - ping <node-name> -- pings node
                 - msg <node-name> <message> -- sends a message to a node
-                - traceroute <node-name> -- traces a route to a node
+                - traceroute/tr <node-name> -- traces a route to a node
                 [debug]
                 - rpkt -- log routing protocol control packets
                 - dpkt -- log routing/forwarded packets
@@ -535,7 +535,7 @@ async fn main() -> anyhow::Result<()> {
                 drop(os);
                 send_routed_packet(per_state.clone(), op_state.clone(), RoutedPacket::Ping, node.to_string()).await?;
             }
-            "traceroute" => {
+            "traceroute" | "tr" => {
                 if split.len() != 2 {
                     error!("Expected one argument");
                     continue;
