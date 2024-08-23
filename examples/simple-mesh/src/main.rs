@@ -4,7 +4,7 @@ mod state;
 mod packet;
 
 use std::cmp::max;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::format;
 use std::io::{BufRead, stdin};
 use std::io::ErrorKind::{ConnectionRefused, TimedOut};
@@ -87,7 +87,7 @@ async fn server(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<Operatin
             tokio::spawn({
                 let c_state = state.clone();
                 let c_op_state = op_state.clone();
-                let c_addr = addr.clone();
+                let c_addr = addr;
                 async move {
                     while let Some(msg) = deserialized.try_next().await.unwrap() {
                         match handle_packet(c_state.clone(), c_op_state.clone(), msg, &c_addr).await {
@@ -146,25 +146,6 @@ async fn route_updater(state: Arc<Mutex<PersistentState>>) -> anyhow::Result<()>
         save_state(&cs).await?;
     }
 }
-fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
-    tokio::spawn(async move {
-        let res = TcpStream::connect(SocketAddrV4::new(addr, 9988)).await;
-        match res {
-            Ok(stream) => {
-                let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
-                let mut serialized = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
-                for pkt in pkts {
-                    serialized.send(pkt).await.unwrap();
-                }
-            }
-            Err(err) => {
-                if (err.kind() != ConnectionRefused && err.kind() != TimedOut) {
-                    anyhow::Result::<()>::Err(anyhow!(err)).unwrap();
-                }
-            }
-        };
-    });
-}
 async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<()> {
     let mut connections: HashMap<Ipv4Addr, Framed<FramedWrite<TcpStream, LengthDelimitedCodec>, NetPacket, NetPacket, Json<NetPacket, NetPacket>>> = HashMap::new();
     let mut next_retry = HashMap::new();
@@ -193,6 +174,7 @@ async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<
 
         if let Some(conn) = connections.get_mut(&dst){
             remove = conn.send(pkt).await.is_err();
+            remove = remove || conn.flush().await.is_err();
         }
 
         if remove{
