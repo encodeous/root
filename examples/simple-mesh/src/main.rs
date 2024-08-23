@@ -210,6 +210,7 @@ async fn send_outbound(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         let mut x = ml!(state);
         x.ps.router.outbound_packets.drain(..).collect::<Vec<OutboundPacket<IPV4System>>>()
     };
+    debug!("[SO] sending {} outgoing packets", out_pkt.len());
     for pkt in out_pkt {
         if let Some(netaddr) = {
             let x = ml!(state);
@@ -219,6 +220,7 @@ async fn send_outbound(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
                 link_id: pkt.link,
                 data: pkt.packet.data.clone(),
             }).await?;
+            debug!("[SP] sent packet to {netaddr}");
         }
     }
     Ok(())
