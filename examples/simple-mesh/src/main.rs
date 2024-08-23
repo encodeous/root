@@ -35,8 +35,8 @@ use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 
-async fn save_state(cfg: &PersistentState) -> anyhow::Result<()> {
-    fs::write("./config.json", serde_json::to_vec(cfg)?).await?;
+async fn save_state(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
+    fs::write("./config.json", serde_json::to_vec(&state.lock().await.ps)?).await?;
     Ok(())
 }
 
@@ -124,6 +124,7 @@ async fn ping_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         for (lid, nlink) in links{
             ping(state.clone(), lid, nlink.neigh_addr, true).await;
         }
+        debug!("Done updating ping");
     }
 }
 async fn route_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
@@ -134,8 +135,8 @@ async fn route_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         ss.ps.router.full_update();
         drop(ss);
         send_outbound(state.clone()).await?;
-        let ss = state.lock().await;
-        save_state(&ss.ps).await?;
+        save_state(state.clone()).await?;
+        debug!("Done updating routes");
     }
 }
 async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<()> {
@@ -482,8 +483,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         setup().await?
     };
-
-    save_state(&saved_state).await?;
     
     let ss = SyncState{
         ps: saved_state,
@@ -499,6 +498,8 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let ssm = Arc::new(Mutex::new(ss));
+
+    save_state(ssm.clone()).await?;
 
     let handles = [
         tokio::spawn(server(ssm.clone())),
@@ -516,8 +517,7 @@ async fn main() -> anyhow::Result<()> {
         let input = match line {
             Ok(x) => { Ok(x) }
             Err(err) => {
-                let ss = ssm.lock().await;
-                save_state(&ss.ps).await?;
+                save_state(ssm.clone()).await?;
                 Err(err)
             }
         }?;
@@ -715,9 +715,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
-    let ss = ssm.lock().await;
-    save_state(&ss.ps).await?;
+    save_state(ssm).await?;
 
     Ok(())
 }
