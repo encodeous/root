@@ -5,6 +5,7 @@ mod packet;
 
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::io::{BufRead, stdin};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
@@ -15,11 +16,10 @@ use futures::TryStreamExt;
 use inquire::{prompt_text};
 use log::{debug, error, info, set_boxed_logger, set_max_level, warn};
 use serde_json::json;
-use simplelog::*;
 use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{Receiver};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use root::router::{DummyMAC, INF, Router};
 use crate::state::{LinkHealth, OperatingState, PersistentState, SyncState};
 use crate::routing::IPV4System;
@@ -156,8 +156,10 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
     let mut next_retry = HashMap::new();
     let mut dirty = HashSet::new();
     let mut buf = Vec::new();
+    debug!("Started packet sending task");
     loop {
         recv.recv_many(&mut buf, 1000).await;
+        debug!("[PS] Batch sending {} packets", buf.len());
         for (dst, pkt) in buf.drain(..){
             if let std::collections::hash_map::Entry::Vacant(e) = connections.entry(dst) {
                 if let Some(time) = next_retry.get(&dst) {
@@ -165,17 +167,26 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
                         continue; // dont want to overload anything
                     }
                 }
-                let res = TcpStream::connect(SocketAddrV4::new(dst, 9988)).await;
+                let res = timeout(Duration::from_millis(500), TcpStream::connect(SocketAddrV4::new(dst, 9988))).await;
                 match res {
-                    Ok(stream) => {
-                        let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
-                        let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
-                        e.insert(symm);
-                        debug!("Created new connection to {dst}");
+                    Ok(res) => {
+                        match res {
+                            Ok(stream) => {
+                                let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
+                                let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
+                                e.insert(symm);
+                                debug!("[PS] Created new connection to {dst}");
+                            }
+                            Err(err) => {
+                                next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
+                                debug!("[PS] Error while sending packets: {err}");
+                                continue;
+                            }
+                        };
                     }
                     Err(err) => {
-                        next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
-                        debug!("Error while sending packets: {err}");
+                        next_retry.insert(dst, Instant::now() + Duration::from_secs(20));
+                        debug!("[PS] Error while sending packets: {err}");
                         continue;
                     }
                 };
@@ -184,7 +195,9 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
             let mut remove = false;
 
             if let Some(conn) = connections.get_mut(&dst){
-                remove = conn.send(pkt).await.is_err();
+                let x = conn.send(pkt).await;
+                remove = x.is_err();
+                debug!("[PS] sending to {dst} res: {x:?}");
                 dirty.insert(dst);
             }
 
@@ -193,7 +206,7 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
             }
         }
         for ip in dirty.drain(){
-            debug!("Flushing connection to {ip}");
+            debug!("[PS] Flushing connection to {ip}");
             let mut remove = false;
             if let Some(conn) = connections.get_mut(&ip){
                 remove = conn.flush().await.is_err();
@@ -211,7 +224,7 @@ async fn send_outbound(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
         x.ps.router.outbound_packets.drain(..).collect::<Vec<OutboundPacket<IPV4System>>>()
     };
     if !out_pkt.is_empty(){
-        debug!("[SO] sending {} outgoing packets", out_pkt.len());
+        debug!("[SO] queueing {} outgoing packets", out_pkt.len());
     }
     for pkt in out_pkt {
         if let Some(netaddr) = {
@@ -222,10 +235,10 @@ async fn send_outbound(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
                 link_id: pkt.link,
                 data: pkt.packet.data.clone(),
             }).await?;
-            debug!("[SP] sent packet to {netaddr}");
+            // debug!("[SP] queued packet to {netaddr}");
         }
         else{
-            debug!("[SP] ?? why wasn't this sent {}", json!(pkt));
+            // debug!("[SP] ?? why wasn't this queued {}", json!(pkt));
         }
     }
     Ok(())
@@ -515,8 +528,10 @@ async fn handle_routed_packet(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    set_max_level(LevelFilter::Info);
-    set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "info")
+    }
+    env_logger::init();
 
     let (sender, recv) = tokio::sync::mpsc::channel(1000);
 
@@ -528,7 +543,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         setup().await?
     };
-    
+
     for (link, netlink) in &saved_state.links{
         saved_state.router.links.insert(
             *link,
