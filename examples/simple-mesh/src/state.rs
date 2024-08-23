@@ -39,3 +39,8 @@ pub struct OperatingState {
     pub log_routing: bool,
     pub log_delivery: bool,
 }
+
+pub struct SyncState{
+    pub ps: PersistentState,
+    pub os: OperatingState
+}
