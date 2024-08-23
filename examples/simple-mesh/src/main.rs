@@ -6,7 +6,7 @@ mod packet;
 use std::collections::HashMap;
 use std::fmt::format;
 use std::io::{BufRead, stdin};
-use std::io::ErrorKind::ConnectionRefused;
+use std::io::ErrorKind::{ConnectionRefused, TimedOut};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::net::SocketAddr::V4;
 use std::ops::DerefMut;
@@ -174,7 +174,7 @@ fn send_packets(addr: Ipv4Addr, pkts: Vec<NetPacket>) {
                 }
             }
             Err(err) => {
-                if (err.kind() != ConnectionRefused) {
+                if (err.kind() != ConnectionRefused && err.kind() != TimedOut) {
                     anyhow::Result::<()>::Err(anyhow!(err)).unwrap();
                 }
             }
@@ -352,6 +352,7 @@ async fn send_routed_packet(
     let cs = state.lock().await;
     let cur_id = cs.router.address.clone();
     drop(cs);
+    // should probably handle next-hop undeliverable... but im lazy :)
     Box::pin(route_packet(state, op_state, data, dst_id, cur_id, None)).await?;
     Ok(())
 }
