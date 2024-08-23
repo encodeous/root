@@ -102,7 +102,8 @@ async fn ping(state: Arc<Mutex<SyncState>>, id: Uuid, addr: Ipv4Addr, silent: bo
         entry.ping_start = Instant::now();
     }
     tokio::spawn(async move {
-        if (send_packets_wait(addr, vec![Ping(id, silent)]).await).is_err() {
+        if let Err(err) = send_packets_wait(addr, vec![Ping(id, silent)]).await {
+            debug!("Error while pinging {err}");
             let mut ss = state.lock().await;
             if let Some(x) = ss.os.health.get_mut(&id){
                 x.ping = Duration::MAX;
@@ -156,8 +157,9 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
                         let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
                         e.insert(symm);
                     }
-                    Err(_) => {
+                    Err(err) => {
                         next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
+                        debug!("Error while sending packets: {err}");
                         continue;
                     }
                 };
@@ -463,8 +465,8 @@ async fn handle_routed_packet(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    set_max_level(LevelFilter::Info);
-    set_boxed_logger(TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
+    set_max_level(LevelFilter::Debug);
+    set_boxed_logger(TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto)).expect("Failed to init logger");
 
     let (sender, recv) = tokio::sync::mpsc::channel(1000);
 
