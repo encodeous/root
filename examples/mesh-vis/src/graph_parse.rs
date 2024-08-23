@@ -101,6 +101,7 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
             next_hop: Some(next_hop),
             fd: if fd == INF { None } else { Some(fd) },
             link: Some(next_hop),
+            retracted: false
         })
     } else {
         // self route
@@ -111,6 +112,7 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
             next_hop: None,
             fd: None,
             link: None,
+            retracted: false
         })
     }
 }

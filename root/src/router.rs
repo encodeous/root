@@ -94,6 +94,7 @@ impl<T: RoutingSystem> Router<T> {
                 },
                 self,
             ),
+            retracted: false
         }
     }
     // endregion
@@ -161,10 +162,9 @@ impl<T: RoutingSystem> Router<T> {
                 }
 
                 let metric = sum_inf(neigh.link_cost, neigh_route.metric);
-                let entry = self.routes.get_mut(src);
 
                 // if the table has the route
-                if let Some(table_route) = entry {
+                if let Some(table_route) = self.routes.get_mut(src) {
                     // update route table if the entry is better
                     if let Some(new_fd) = Self::is_feasible(table_route, neigh_route, metric) {
                         // we have a better route!
@@ -181,7 +181,10 @@ impl<T: RoutingSystem> Router<T> {
                                 if metric > fd {
                                     // infeasible route, we should retract this
                                     table_route.metric = INF;
-                                    retractions.push(table_route.source.clone());
+                                    if !table_route.retracted{
+                                        retractions.push(table_route.source.clone());
+                                    }
+                                    table_route.retracted = true;
                                 } else {
                                     // same or better route
                                     table_route.metric = metric;
@@ -442,6 +445,7 @@ impl<T: RoutingSystem> Router<T> {
                     link: None,
                     fd: None,
                     next_hop: None,
+                    retracted: false
                 };
                 neighbour.routes.insert(addr.clone(), route);
             }

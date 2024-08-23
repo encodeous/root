@@ -19,6 +19,8 @@ pub struct Route<T: RoutingSystem + ?Sized> {
     pub link: Option<T::Link>,
     /// the next-hop address of this route, not sent to neighbours
     pub next_hop: Option<T::NodeAddress>,
+    /// whether this route has been retracted, if it has, do not retract again
+    pub retracted: bool
 }
 
 #[derive(Serialize, Deserialize, Educe)]
