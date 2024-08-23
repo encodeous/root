@@ -29,13 +29,12 @@ pub struct LinkHealth{
     pub ping_start: Instant,
 }
 
-#[derive(Default)]
 pub struct OperatingState {
     pub health: HashMap<<IPV4System as RoutingSystem>::Link, LinkHealth>,
     pub unlinked: HashMap<<IPV4System as RoutingSystem>::Link, NetLink>,
     pub link_requests: HashMap<<IPV4System as RoutingSystem>::NodeAddress, NetLink>,
     pub pings: HashMap<<IPV4System as RoutingSystem>::NodeAddress, Instant>,
-    pub packet_queue: Option<Sender<(Ipv4Addr, NetPacket)>>,
+    pub packet_queue: Sender<(Ipv4Addr, NetPacket)>,
     pub log_routing: bool,
     pub log_delivery: bool,
 }

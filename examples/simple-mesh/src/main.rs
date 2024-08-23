@@ -66,7 +66,7 @@ async fn server(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
     loop {
         let (sock, addr) = listener.accept().await?;
 
-        debug!("Got packet from {addr}");
+        debug!("Got connection from {addr}");
 
         let len_del = FramedRead::new(sock, LengthDelimitedCodec::new());
         let mut deserialized = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
@@ -117,6 +117,7 @@ async fn ping(state: Arc<Mutex<SyncState>>, id: Uuid, addr: Ipv4Addr, silent: bo
 async fn ping_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
+        debug!("Updating ping");
         let ss = state.lock().await;
         let links = ss.ps.links.clone();
         drop(ss);
@@ -128,6 +129,7 @@ async fn ping_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
 async fn route_updater(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
     loop {
         sleep(Duration::from_millis(5000)).await;
+        debug!("Updating routes");
         let mut ss = state.lock().await;
         ss.ps.router.full_update();
         drop(ss);
@@ -156,6 +158,7 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
                         let len_del = FramedWrite::new(stream, LengthDelimitedCodec::new());
                         let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
                         e.insert(symm);
+                        debug!("Created new connection to {dst}");
                     }
                     Err(err) => {
                         next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
@@ -177,6 +180,7 @@ async fn packet_sender(mut recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Res
             }
         }
         for ip in dirty.drain(){
+            debug!("Flushing connection to {ip}");
             let mut remove = false;
             if let Some(conn) = connections.get_mut(&ip){
                 remove = conn.flush().await.is_err();
@@ -217,9 +221,7 @@ async fn send_packets_wait(addr: Ipv4Addr, pkts: Vec<NetPacket>) -> anyhow::Resu
 
 async fn send_packet(state: Arc<Mutex<SyncState>>, addr: Ipv4Addr, pkt: NetPacket) -> anyhow::Result<()> {
     let mut ss = state.lock().await;
-    if let Some(sender) = &ss.os.packet_queue {
-        sender.send((addr, pkt)).await?;
-    }
+    ss.os.packet_queue.send((addr, pkt)).await?;
     Ok(())
 }
 
@@ -241,7 +243,9 @@ async fn update_link_health(state: Arc<Mutex<SyncState>>, link: Uuid, new_ping: 
 
 async fn handle_packet(state: Arc<Mutex<SyncState>>, pkt: NetPacket, addr: &Ipv4Addr) -> anyhow::Result<()> {
     let mut ss = state.lock().await;
-
+    
+    debug!("Handling packet {}", json!(pkt));
+    
     match pkt {
         Ping(id, silent) => {
             if let Some(link) = ss.ps.links.get(&id) {
@@ -480,12 +484,19 @@ async fn main() -> anyhow::Result<()> {
     };
 
     save_state(&saved_state).await?;
-    let mut i_os = OperatingState::default();
-    i_os.packet_queue = Some(sender);
     
     let ss = SyncState{
         ps: saved_state,
-        os: i_os
+        os: OperatingState{
+            health: Default::default(),
+            unlinked: Default::default(),
+            link_requests: Default::default(),
+            pings: Default::default(),
+            packet_queue: sender,
+
+            log_routing: false,
+            log_delivery: false,
+        }
     };
     let ssm = Arc::new(Mutex::new(ss));
 
