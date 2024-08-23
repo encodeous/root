@@ -427,11 +427,10 @@ impl<T: RoutingSystem> Router<T> {
                 if update.metric == INF { // validate retraction
                     if entry.metric != INF && selected{
                         // the route is our immediate next route, we need to handle this retraction
-                        if action != NoAction {
-                            error!("Unexpected state: A seqno increase should not have a metric of INF!")
+                        if action == NoAction {
+                            action = Retraction;
+                            entry.metric = update.metric;
                         }
-                        action = Retraction;
-                        entry.metric = update.metric;
                     }
                 }
                 else{
