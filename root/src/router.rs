@@ -156,14 +156,13 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
         for (link, neigh) in &mut self.links {
+            if neigh.link_cost == 0 {
+                warn!("Metric over link {} to {} should not be 0, this has been corrected", json!(neigh.link), json!(neigh.addr));
+                neigh.link_cost = 1;
+            }
             for (src, neigh_route) in &neigh.routes {
                 if *src == self.address{
                     continue; // we can safely ignore a route to ourself
-                }
-                
-                if neigh.link_cost == 0{
-                    warn!("Metric over link {} to {} should not be 0, this has been corrected", json!(neigh.link), json!(neigh.addr));
-                    neigh.link_cost = 1;
                 }
 
                 let metric = sum_inf(neigh.link_cost, neigh_route.metric);
@@ -178,6 +177,7 @@ impl<T: RoutingSystem> Router<T> {
                         table_route.fd = Some(new_fd);
                         table_route.link = Some(link.clone());
                         table_route.next_hop = Some(neigh.addr.clone());
+                        table_route.retracted = false;
                     } else if let Some(nh) = &table_route.next_hop {
                         // this is a selected route, we should update this regardless.
                         if *nh == neigh.addr {
@@ -194,17 +194,19 @@ impl<T: RoutingSystem> Router<T> {
                                     // same or better route
                                     table_route.metric = metric;
                                     table_route.fd = Some(metric);
+                                    table_route.retracted = false;
                                 }
                             }
                         }
                     }
-                } else {
-                    // create the new route
+                } else if metric != INF {
+                    // create the new route, if it is valid
                     let mut n_route = neigh_route.clone();
                     n_route.next_hop = Some(neigh.addr.clone());
                     n_route.metric = metric;
                     n_route.fd = Some(metric);
                     n_route.link = Some(link.clone());
+                    n_route.retracted = false;
 
                     self.routes.insert(src.clone(), n_route);
                 }
