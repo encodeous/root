@@ -506,11 +506,13 @@ async fn main() -> anyhow::Result<()> {
                 rtable.push(format!("Self: {}, seq: {}", cs.router.address, cs.router.seqno));
                 for (addr, route) in &cs.router.routes {
                     rtable.push(
-                        format!("{addr} - nh: {}, c: {}, via: {}, seq: {}",
+                        format!("{addr} - via: {}, nh: {}, c: {}, seq: {}, fd: {}, ret: {}",
+                                route.link.unwrap_or(Uuid::nil()),
                                 route.next_hop.clone().unwrap_or("?".to_string()),
                                 route.metric,
-                                route.link.unwrap_or(Uuid::nil()),
-                                route.source.data.seqno
+                                route.source.data.seqno,
+                                route.fd.unwrap_or(INF),
+                                route.retracted
                         ))
                 }
                 info!("{}", rtable.join("\n"));
