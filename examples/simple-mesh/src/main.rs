@@ -182,7 +182,7 @@ async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<
                     let symm = SymmetricallyFramed::new(len_del, SymmetricalJson::<NetPacket>::default());
                     e.insert(symm);
                 }
-                Err(err) => {
+                Err(_) => {
                     next_retry.insert(dst, Instant::now() + Duration::from_secs(5));
                     continue;
                 }
@@ -192,7 +192,7 @@ async fn packet_sender(recv: Receiver<(Ipv4Addr, NetPacket)>) -> anyhow::Result<
         let mut remove = false;
 
         if let Some(conn) = connections.get_mut(&dst){
-            remove = conn.send(pkt).await.is_ok();
+            remove = conn.send(pkt).await.is_err();
         }
 
         if remove{
