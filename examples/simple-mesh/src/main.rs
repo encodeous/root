@@ -39,9 +39,10 @@ use tokio_serde::{Serializer, Deserializer, Framed, SymmetricallyFramed};
 use tokio_serde::formats::SymmetricalJson;
 use uuid::{Error, Uuid};
 use root::concepts::neighbour::Neighbour;
+use root::framework::RoutingSystem;
 use crate::link::NetLink;
-use crate::packet::NetPacket;
-use crate::packet::NetPacket::{LinkRequest, Ping, Pong};
+use crate::packet::{NetPacket, RoutedPacket};
+use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 
 async fn save_state(cfg: &PersistentState) -> anyhow::Result<()> {
     fs::write("./config.json", serde_json::to_vec(cfg)?).await?;
@@ -236,7 +237,9 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
         }
         NetPacket::Routing { link_id, data } => {
             if let Some(link) = cs.links.get(&link_id) {
-                info!("Routing Packet: {}", json!(data));
+                if os.log_routing {
+                    info!("RP From: {}, {}, via {}", link.neigh_node, json!(data), link.link);
+                }
                 let n_nid = link.neigh_node.clone();
                 cs.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid);
                 cs.router.update();
@@ -244,8 +247,8 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
             }
         }
         LinkRequest { link_id, from } => {
-            info!("LINKING REQUEST: {link_id} from {from}. Type \"alink {link_id}\" to accept.");
-            os.link_requests.insert(link_id, NetLink {
+            info!("LINKING REQUEST: {link_id} from {from}. Type \"alink {from}\" to accept.");
+            os.link_requests.insert(from.clone(), NetLink {
                 link: link_id,
                 neigh_addr: addr.clone(),
                 neigh_node: from,
@@ -267,8 +270,164 @@ async fn handle_packet(state: Arc<Mutex<PersistentState>>, op_state: Arc<Mutex<O
                 cs.links.insert(link_id, net_link);
             }
         }
+        NetPacket::Deliver { dst_id, sender_id, data } => {
+            if dst_id == cs.router.address{
+                drop(cs);
+                drop(os);
+                handle_routed_packet(state, op_state, data, sender_id).await?;
+            }
+            else{
+                // do routing
+                drop(cs);
+                drop(os);
+                route_packet(state, op_state, data, dst_id, sender_id, Some(*addr)).await?;
+            }
+        }
+        NetPacket::Undeliverable { dst_id, sender_id } => {
+            if sender_id == cs.router.address{
+                warn!("The destination {dst_id} is undeliverable")
+            }
+            else{
+                // do routing
+                if let Some(route) = cs.router.routes.get(&sender_id){
+                    if let Some(nh) = &route.next_hop{
+                        if os.log_routing {
+                            info!("UND sender: {}, dst: {}, nh: {}", sender_id, dst_id, nh);
+                        }
+                        // forward packet
+                        if let Some(link) = route.link{
+                            if let Some(netlink) = cs.links.get(&link){
+                                send_packet(netlink.neigh_addr, NetPacket::Undeliverable {
+                                    dst_id,
+                                    sender_id
+                                });
+                            }
+                        }
+                    }
+                }
+                // lets not send an undeliverable packet if i cant deliver it lmaooo
+            }
+        }
+        NetPacket::TraceRoute { dst_id, sender_id, mut path } => {
+            path.push(cs.router.address.clone());
+            if dst_id == cs.router.address{
+                drop(cs);
+                drop(os);
+                send_routed_packet(state, op_state, RoutedPacket::TracedRoute {
+                    path
+                }, sender_id).await?;
+            }
+            else{
+                // do routing
+                if let Some(route) = cs.router.routes.get(&dst_id){
+                    if let Some(nh) = &route.next_hop{
+                        if os.log_routing {
+                            info!("TRT sender: {}, dst: {}, nh: {}", sender_id, dst_id, nh);
+                        }
+                        // forward packet
+                        if let Some(link) = route.link{
+                            if let Some(netlink) = cs.links.get(&link){
+                                send_packet(netlink.neigh_addr, NetPacket::TraceRoute {
+                                    dst_id,
+                                    sender_id,
+                                    path
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
+    Ok(())
+}
+
+async fn send_routed_packet(
+    state: Arc<Mutex<PersistentState>>,
+    op_state: Arc<Mutex<OperatingState>>,
+    data: RoutedPacket,
+    dst_id: <IPV4System as RoutingSystem>::NodeAddress,
+) -> anyhow::Result<()> {
+    let cs = state.lock().await;
+    let cur_id = cs.router.address.clone();
+    drop(cs);
+    Box::pin(route_packet(state, op_state, data, dst_id, cur_id, None)).await?;
+    Ok(())
+}
+
+async fn route_packet(
+    state: Arc<Mutex<PersistentState>>,
+    op_state: Arc<Mutex<OperatingState>>,
+    data: RoutedPacket,
+    dst_id: <IPV4System as RoutingSystem>::NodeAddress,
+    sender_id: <IPV4System as RoutingSystem>::NodeAddress,
+    prev_hop: Option<Ipv4Addr>
+) -> anyhow::Result<()> {
+    let mut os = op_state.lock().await;
+    let mut cs = state.lock().await;
+    if dst_id == cs.router.address{
+        drop(cs);
+        drop(os);
+        handle_routed_packet(state, op_state, data, sender_id).await?;
+    }
+    else{
+        // do routing
+        if let Some(route) = cs.router.routes.get(&dst_id){
+            if let Some(nh) = &route.next_hop{
+                if os.log_routing {
+                    info!("DP sender: {}, dst: {}, nh: {}", sender_id, dst_id, nh);
+                }
+                // forward packet
+                if let Some(link) = route.link{
+                    if let Some(netlink) = cs.links.get(&link){
+                        send_packet(netlink.neigh_addr, NetPacket::Deliver {
+                            dst_id,
+                            sender_id, data
+                        });
+                        return Ok(())
+                    }
+                }
+            }
+        }
+        // undeliverable
+        if let Some(addr) = prev_hop{
+            send_packet(addr, NetPacket::Undeliverable {
+                dst_id,
+                sender_id
+            });
+        }
+    }
+    Ok(())
+}
+
+async fn handle_routed_packet(
+    state: Arc<Mutex<PersistentState>>,
+    op_state: Arc<Mutex<OperatingState>>,
+    pkt: RoutedPacket,
+    src: <IPV4System as RoutingSystem>::NodeAddress
+) -> anyhow::Result<()> {
+    let mut cs = state.lock().await;
+    let mut os = op_state.lock().await;
+    
+    match pkt {
+        RoutedPacket::Ping => {
+            drop(cs);
+            drop(os);
+            send_routed_packet(state, op_state, RoutedPacket::Pong, src).await?;
+        }
+        RoutedPacket::Pong => {
+            if let Some(start) = os.pings.remove(&src){
+                info!("Pong from {src} {:?}", (Instant::now() - start) / 2);
+            }
+        }
+        RoutedPacket::TracedRoute { path } => {
+            info!("Traced route from {src}: {}", path.join(" -> "));
+        }
+        RoutedPacket::Message(msg) => {
+            info!("{src}> {msg}")
+        }
+    }
     Ok(())
 }
 
@@ -330,10 +489,12 @@ async fn main() -> anyhow::Result<()> {
                 - dlink <link-id> -- deletes a link
                 [routing]
                 - route -- prints whole route table
-                - nh -- gets next hop to node
-                - ping -- pings node
-                - msg -- sends a message to a node
-                - tracert -- traces a route to a node
+                - ping <node-name> -- pings node
+                - msg <node-name> <message> -- sends a message to a node
+                - traceroute <node-name> -- traces a route to a node
+                [debug]
+                - rpkt -- log routing protocol control packets
+                - dpkt -- log routing/forwarded packets
                 "#);
             }
             "route" => {
@@ -350,8 +511,54 @@ async fn main() -> anyhow::Result<()> {
                 }
                 info!("{}", rtable.join("\n"));
             }
+            "rpkt" => {
+                os.log_routing = !os.log_routing;
+            }
+            "dpkt" => {
+                os.log_delivery = !os.log_delivery;
+            }
             "exit" => {
                 break;
+            }
+            "ping" => {
+                if split.len() != 2 {
+                    error!("Expected one argument");
+                    continue;
+                }
+                let node = split[1];
+                os.pings.insert(node.to_string(), Instant::now());
+                drop(cs);
+                drop(os);
+                send_routed_packet(per_state.clone(), op_state.clone(), RoutedPacket::Ping, node.to_string()).await?;
+            }
+            "traceroute" => {
+                if split.len() != 2 {
+                    error!("Expected one argument");
+                    continue;
+                }
+                let node = split[1];
+                if let Some(nh) = cs.router.routes.get(node){
+                    if let Some(link) = nh.link{
+                        if let Some(netlink) = cs.links.get(&link){
+                            send_packet(netlink.neigh_addr, TraceRoute {
+                                path: vec![],
+                                dst_id: node.to_string(),
+                                sender_id: cs.router.address.clone()
+                            })
+                        }
+                    }
+                }
+            }
+            "msg" => {
+                if split.len() != 2 {
+                    error!("Expected at least arguments");
+                    continue;
+                }
+                let node = split[1];
+                let msg = split[2..].join(" ");
+                drop(cs);
+                drop(os);
+                send_routed_packet(per_state.clone(), op_state.clone(), RoutedPacket::Message(msg), node.to_string()).await?;
             }
             "ls" => {
                 for (id, net) in &cs.links {
@@ -403,32 +610,24 @@ async fn main() -> anyhow::Result<()> {
                     error!("Expected one argument");
                     continue;
                 }
-                let id = Uuid::parse_str(split[1]);
-                match id {
-                    Ok(uuid) => {
-                        if let Some(netlink) = os.link_requests.remove(&uuid) {
-                            cs.router.links.insert(
-                                netlink.link,
-                                Neighbour {
-                                    addr: netlink.neigh_node.clone(),
-                                    link: netlink.link,
-                                    link_cost: INF,
-                                    routes: HashMap::new(),
-                                },
-                            );
-                            send_packet(netlink.neigh_addr, NetPacket::LinkResponse {
-                                link_id: netlink.link,
-                                node_id: cs.router.address.clone(),
-                            });
-                            cs.links.insert(netlink.link, netlink);
-                            info!("LINKING SUCCESS");
-                        } else {
-                            error!("No matching linking code found!");
-                        }
-                    }
-                    Err(_) => {
-                        error!("Invalid UUID")
-                    }
+                if let Some(netlink) = os.link_requests.remove(split[1]) {
+                    cs.router.links.insert(
+                        netlink.link,
+                        Neighbour {
+                            addr: netlink.neigh_node.clone(),
+                            link: netlink.link,
+                            link_cost: INF,
+                            routes: HashMap::new(),
+                        },
+                    );
+                    send_packet(netlink.neigh_addr, NetPacket::LinkResponse {
+                        link_id: netlink.link,
+                        node_id: cs.router.address.clone(),
+                    });
+                    cs.links.insert(netlink.link, netlink);
+                    info!("LINKING SUCCESS");
+                } else {
+                    error!("No matching linking code found!");
                 }
             }
             "dlink" => {

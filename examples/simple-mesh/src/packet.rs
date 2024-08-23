@@ -1,3 +1,4 @@
+use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use root::concepts::packet::Packet;
@@ -19,5 +20,29 @@ pub enum NetPacket{
     LinkResponse{
         link_id: <IPV4System as RoutingSystem>::Link,
         node_id: <IPV4System as RoutingSystem>::NodeAddress
+    },
+    Deliver{
+        dst_id: <IPV4System as RoutingSystem>::NodeAddress,
+        sender_id: <IPV4System as RoutingSystem>::NodeAddress,
+        data: RoutedPacket
+    },
+    Undeliverable{
+        dst_id: <IPV4System as RoutingSystem>::NodeAddress,
+        sender_id: <IPV4System as RoutingSystem>::NodeAddress
+    },
+    TraceRoute{
+        dst_id: <IPV4System as RoutingSystem>::NodeAddress,
+        sender_id: <IPV4System as RoutingSystem>::NodeAddress,
+        path: Vec<<IPV4System as RoutingSystem>::NodeAddress>
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum RoutedPacket{
+    Ping,
+    Pong,
+    TracedRoute{
+        path: Vec<<IPV4System as RoutingSystem>::NodeAddress>
+    },
+    Message(String)
 }

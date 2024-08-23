@@ -26,5 +26,8 @@ pub struct LinkHealth{
 pub struct OperatingState {
     pub health: HashMap<<IPV4System as RoutingSystem>::Link, LinkHealth>,
     pub unlinked: HashMap<<IPV4System as RoutingSystem>::Link, NetLink>,
-    pub link_requests: HashMap<<IPV4System as RoutingSystem>::Link, NetLink>
+    pub link_requests: HashMap<<IPV4System as RoutingSystem>::NodeAddress, NetLink>,
+    pub pings: HashMap<<IPV4System as RoutingSystem>::NodeAddress, Instant>,
+    pub log_routing: bool,
+    pub log_delivery: bool,
 }
