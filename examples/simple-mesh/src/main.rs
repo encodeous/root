@@ -203,7 +203,7 @@ fn update_link_health(cs: &mut PersistentState, link: Uuid, link_health: &LinkHe
                 INF
             }
             else{
-                link_health.ping.as_millis() as u16
+                max(link_health.ping.as_millis() as u16, 1)
             }
         }
     }
