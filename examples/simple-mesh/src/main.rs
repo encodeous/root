@@ -502,6 +502,8 @@ async fn main() -> anyhow::Result<()> {
             "route" => {
                 let mut rtable = vec![];
                 info!("Route Table:");
+                rtable.push(String::new());
+                rtable.push(format!("Self: {}, seq: {}", cs.router.address, cs.router.seqno));
                 for (addr, route) in &cs.router.routes {
                     rtable.push(
                         format!("{addr} - nh: {}, c: {}, via: {}, seq: {}",
