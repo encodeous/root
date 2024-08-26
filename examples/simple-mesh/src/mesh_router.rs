@@ -1,7 +1,9 @@
 use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +27,6 @@ use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::routing::IPV4System;
-use crate::save_state;
 use crate::state::{LinkHealth, MainLoopEvent, MessageQueue, OperatingState, PersistentState, QueuedPacket, SyncState};
 use crate::state::MainLoopEvent::{DispatchPingLink, InboundPacket, NoEvent, PingResultFailed, RoutePacket, Shutdown, TimerPingUpdate, TimerRouteUpdate};
 
@@ -258,10 +259,16 @@ fn main_loop(
             }
         }
     }
-    
+
     info!("The router has shutdown, saving state...");
-    
-    tokio::spawn(save_state(ps));
+
+    let content = {
+        serde_json::to_vec(&ps)?
+    };
+    fs::write("./config.json", content)?;
+    debug!("Saved State");
+
+    exit(0);
     Ok(())
 }
 

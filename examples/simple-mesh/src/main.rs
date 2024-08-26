@@ -6,18 +6,18 @@ mod mesh_router;
 
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::env;
+use std::{env, fs};
 use std::io::{BufRead, stdin};
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use anyhow::anyhow;
 use futures::SinkExt;
 use futures::TryStreamExt;
 use inquire::{prompt_text};
 use log::{debug, error, info, set_boxed_logger, set_max_level, warn};
 use serde_json::json;
-use tokio::fs;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{Receiver};
 use tokio::time::{sleep, timeout};
@@ -35,15 +35,6 @@ use crate::mesh_router::start_router;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::state::MainLoopEvent::DispatchCommand;
-
-async fn save_state(ps: PersistentState) -> anyhow::Result<()> {
-    let content = {
-        serde_json::to_vec(&ps)?
-    };
-    fs::write("./config.json", content).await?;
-    debug!("Saved State");
-    Ok(())
-}
 
 async fn setup() -> anyhow::Result<PersistentState> {
     info!("Node Setup (First Time):");
@@ -78,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Type \"help\" for help");
     
-    let mut saved_state = if let Ok(file) = fs::read_to_string("./config.json").await {
+    let mut saved_state = if let Ok(file) = fs::read_to_string("./config.json") {
         serde_json::from_str(&file)?
     } else {
         setup().await?
@@ -107,16 +98,22 @@ async fn main() -> anyhow::Result<()> {
     });
     
     let mut input_buf = String::new();
-    
+
+    let tmq = mq.clone();
+    ctrlc::set_handler(move || {
+        tmq.cancellation_token.cancel();
+        tmq.main.send(DispatchCommand(String::new())).unwrap();
+    }).expect("Error setting Ctrl-C handler");
+
     while !mq.cancellation_token.is_cancelled(){
         stdin().read_line(&mut input_buf)?;
         mq.main.send(DispatchCommand(input_buf))?;
         input_buf = String::new();
     }
     
-    mq.cancellation_token.cancel();
-    
     sleep(Duration::from_secs(1)).await; // wait for main thread to finish
 
+    
+    
     Ok(())
 }
