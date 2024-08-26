@@ -110,6 +110,7 @@ async fn link_io(
         let res = timeout(Duration::from_millis(5000), TcpStream::connect(SocketAddrV4::new(dst, 9988))).await;
 
         let mut status: anyhow::Result<()> = Ok(());
+        let mut fail = NoEvent;
 
         if let Ok(Ok(mut stream)) = res{
             debug!("Connected to {dst}");
@@ -118,6 +119,7 @@ async fn link_io(
                 let write = async {
                     for _ in 0..max(mr.len(), 1){
                         let packet = mr.recv().await.ok_or(anyhow!("Stream Ended"))?;
+                        fail = packet.failure_event;
                         trace!("Writing packet: {} to {dst}", json!(packet.packet));
                         serde_json::to_writer(&mut bytes, &packet.packet)?;
                         stream.write_u32(bytes.len() as u32).await?;
@@ -140,6 +142,10 @@ async fn link_io(
         // failure
 
         if let Err(x) = status{
+            if let NoEvent = fail{}
+            else{
+                mq.main.send(fail)?;
+            }
             debug!("Error occurred while trying to write packet to {dst}: {x:?}");
         }
 
@@ -147,7 +153,10 @@ async fn link_io(
         
         while Instant::now() < wakeup{
             if let Ok(Some(packet)) = timeout(Duration::from_millis(100), mr.recv()).await{
-                mq.main.send(packet.failure_event)?;
+                if let NoEvent = packet.failure_event{}
+                else{
+                    mq.main.send(packet.failure_event)?;
+                }
             }
         }
     }
