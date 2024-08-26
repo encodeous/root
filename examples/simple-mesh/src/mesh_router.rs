@@ -26,7 +26,7 @@ use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::routing::IPV4System;
 use crate::state::{LinkHealth, MainLoopEvent, MessageQueue, OperatingState, PersistentState, QueuedPacket, SyncState};
-use crate::state::MainLoopEvent::{DispatchPingLink, InboundPacket, NoEvent, PingResultFailed, RoutePacket, Shutdown};
+use crate::state::MainLoopEvent::{DispatchPingLink, InboundPacket, NoEvent, PingResultFailed, RoutePacket, Shutdown, TimerPingUpdate, TimerRouteUpdate};
 
 pub fn start_router(ps: PersistentState, os: OperatingState) -> MessageQueue{
     let (mtx, mrx) = unbounded();
@@ -46,6 +46,22 @@ pub fn start_router(ps: PersistentState, os: OperatingState) -> MessageQueue{
         main_loop(ps, os, tmq, mrx).context("Packet Sender Thread Failed: ").unwrap();
     });
     tokio::spawn(server(mq.clone()));
+    let tmq = mq.clone();
+    // ping neighbours
+    tokio::spawn(async move {
+        while !tmq.cancellation_token.is_cancelled(){
+            tmq.main.send(TimerPingUpdate).unwrap();
+            sleep(Duration::from_secs(5)).await;
+        }
+    });
+    let tmq = mq.clone();
+    // broadcast routes
+    tokio::spawn(async move {
+        while !tmq.cancellation_token.is_cancelled(){
+            tmq.main.send(TimerRouteUpdate).unwrap();
+            sleep(Duration::from_secs(10)).await;
+        }
+    });
     mq
 }
 
