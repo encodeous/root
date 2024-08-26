@@ -1,6 +1,6 @@
 use crate::concepts::neighbour::Neighbour;
 use crate::concepts::packet::{OutboundPacket, Packet, RouteUpdate};
-use crate::concepts::route::{Route, Source};
+use crate::concepts::route::{ExternalRoute, Route, Source};
 use crate::framework::{MAC, MACSignature, MACSystem, RootData, RoutingSystem};
 use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
 use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
@@ -80,23 +80,7 @@ impl<T: RoutingSystem> Router<T> {
             });
         }
     }
-
-    fn make_self_route_for_seqno(&self, seqno: u16) -> Route<T> {
-        Route {
-            link: None,
-            fd: None,
-            metric: 0,
-            next_hop: None,
-            source: self.mac_sys.sign(
-                Source {
-                    addr: self.address.clone(),
-                    seqno,
-                },
-                self,
-            ),
-            retracted: false
-        }
-    }
+    
     // endregion
 
     // region Route Selection
@@ -125,18 +109,17 @@ impl<T: RoutingSystem> Router<T> {
         }
     }
 
-    fn is_feasible(selected_route: &Route<T>, new_route: &Route<T>, metric: u16) -> Option<u16> {
-        if let Some(fd) = selected_route.fd {
-            let s = selected_route.source.data().seqno;
-            let n = new_route.source.data().seqno;
-            if seqno_less_than(n, s) {
-                return None;
-            }
-            if metric < fd || seqno_less_than(s, n)
-                || (metric == fd && selected_route.metric == INF) // TODO: Prove why this is valid, and doesnt cause issues...
-            {
-                return Some(metric);
-            }
+    fn is_feasible(selected_route: &Route<T>, new_route: &ExternalRoute<T>, metric: u16) -> Option<u16> {
+        let fd = selected_route.fd;
+        let s = selected_route.source.data().seqno;
+        let n = new_route.source.data().seqno;
+        if seqno_less_than(n, s) {
+            return None;
+        }
+        if metric < fd || seqno_less_than(s, n)
+            || (metric == fd && selected_route.metric == INF) // TODO: Prove why this is valid, and doesnt cause issues...
+        {
+            return Some(metric);
         }
         None
     }
@@ -146,16 +129,14 @@ impl<T: RoutingSystem> Router<T> {
         // handle route retractions
         let mut retractions = Vec::new();
         for (_addr, route) in &mut self.routes {
-            if let Some(link) = &route.link {
-                // this should always be true if the next hop exists
-                // check if link still exists
-                if !self.links.contains_key(link) || self.links.get(link).unwrap().link_cost == INF{
-                    route.metric = INF;
-                    if !route.retracted{
-                        retractions.push(route.source.clone());
-                    }
-                    route.retracted = true;
+            let link = &route.link;
+            // check if link still exists
+            if !self.links.contains_key(link) || self.links.get(link).unwrap().link_cost == INF{
+                route.metric = INF;
+                if !route.retracted{
+                    retractions.push(route.source.clone());
                 }
+                route.retracted = true;
             }
         }
         for (link, neigh) in &mut self.links {
@@ -177,40 +158,41 @@ impl<T: RoutingSystem> Router<T> {
                         // we have a better route!
                         table_route.metric = metric;
                         table_route.source = neigh_route.source.clone();
-                        table_route.fd = Some(new_fd);
-                        table_route.link = Some(link.clone());
-                        table_route.next_hop = Some(neigh.addr.clone());
+                        table_route.fd = new_fd;
+                        table_route.link = link.clone();
+                        table_route.next_hop = neigh.addr.clone();
                         table_route.retracted = false;
-                    } else if let Some(nh) = &table_route.next_hop {
+                    } else {
+                        let nh = &table_route.next_hop;
+                        let fd = table_route.fd;
                         // this is a selected route, we should update this regardless.
                         if *nh == neigh.addr {
                             // update route metric
-                            if let Some(fd) = table_route.fd {
-                                if metric > fd {
-                                    // infeasible route, we should retract this
-                                    table_route.metric = INF;
-                                    if !table_route.retracted{
-                                        retractions.push(table_route.source.clone());
-                                    }
-                                    table_route.retracted = true;
-                                } else {
-                                    // same or better route
-                                    table_route.metric = metric;
-                                    table_route.fd = Some(metric);
-                                    table_route.retracted = false;
+                            if metric > fd {
+                                // infeasible route, we should retract this
+                                table_route.metric = INF;
+                                if !table_route.retracted{
+                                    retractions.push(table_route.source.clone());
                                 }
+                                table_route.retracted = true;
+                            } else {
+                                // same or better route
+                                table_route.metric = metric;
+                                table_route.fd = metric;
+                                table_route.retracted = false;
                             }
                         }
                     }
                 } else if metric != INF {
                     // create the new route, if it is valid
-                    let mut n_route = neigh_route.clone();
-                    n_route.next_hop = Some(neigh.addr.clone());
-                    n_route.metric = metric;
-                    n_route.fd = Some(metric);
-                    n_route.link = Some(link.clone());
-                    n_route.retracted = false;
-
+                    let n_route = Route{
+                        source: neigh_route.source.clone(),
+                        metric,
+                        fd: metric,
+                        link: link.clone(),
+                        next_hop: neigh.addr.clone(),
+                        retracted: false,
+                    };
                     self.routes.insert(src.clone(), n_route);
                 }
             }
@@ -399,25 +381,25 @@ impl<T: RoutingSystem> Router<T> {
         link: &T::Link,
         neigh: &T::NodeAddress
     ) -> UpdateAction {
-        let Source { addr, seqno } = update.source.data();
+        let Source { addr: src, seqno } = update.source.data();
 
-        if *addr == self.address{
+        if *src == self.address{
             // just ignore this
             return NoAction;
         }
 
         // validate update
-        if !self.mac_sys.validate(&update.source, addr) {
+        if !self.mac_sys.validate(&update.source, src) {
             error!(
                 "Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?",
-                json!(addr),
+                json!(src),
                 json!(neigh)
             );
             return NoAction;
         }
 
         let mut action = NoAction;
-        let stored_seqno = self.get_seqno_for(addr);
+        let stored_seqno = self.get_seqno_for(src);
         if let Some(d_seqno) = stored_seqno {
             if seqno_less_than(*seqno, d_seqno) {
                 return NoAction; // our neighbour is probably out of date. seqno cannot decrease
@@ -428,39 +410,39 @@ impl<T: RoutingSystem> Router<T> {
         
         // check if this route is the currently selected route
         let mut selected = false;
-        if let Some(route) = self.routes.get(addr){
-            if let Some(nh) = &route.next_hop{
-                selected = nh == neigh;
-            }
+        if let Some(route) = self.routes.get(src){
+            selected = route.next_hop == *neigh;
         }
 
         if let Some(neighbour) = self.links.get_mut(link) {
             // update the value
-            if let Some(entry) = neighbour.routes.get_mut(addr) { // neighbour entry exists!
-                entry.source = update.source.clone();
-                if update.metric == INF { // validate retraction
-                    if entry.metric != INF && selected{
-                        // the route is our immediate next route, we need to handle this retraction
-                        if action == NoAction {
+            if let Some(table_route) = neighbour.routes.get_mut(src){
+                table_route.source = update.source.clone();
+                if update.metric == INF{
+                    // handle retraction
+                    
+                    // make sure we don't re-retract an already retracted route
+                    if !table_route.retracted {
+                        if action == NoAction && selected{
+                            // broadcast this retraction, since we are advertising it
                             action = Retraction;
-                            entry.metric = update.metric;
                         }
+                        table_route.metric = INF;
+                        table_route.retracted = true
                     }
                 }
                 else{
-                    entry.metric = update.metric;
+                    table_route.metric = update.metric;
                 }
-            } else if update.metric != INF || selected {
+            }
+            else if update.metric != INF {
                 // we add the route if it is not INF, and it is not the next hop
-                let route = Route {
-                    source: update.source.clone(),
+                let route = ExternalRoute {
+                source: update.source.clone(),
                     metric: update.metric,
-                    link: None,
-                    fd: None,
-                    next_hop: None,
                     retracted: false
                 };
-                neighbour.routes.insert(addr.clone(), route);
+                neighbour.routes.insert(src.clone(), route);
             }
         }
         action
