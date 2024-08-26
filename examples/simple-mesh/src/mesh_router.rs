@@ -83,15 +83,15 @@ fn packet_sender(
         }
 
         let mut remove = false;
-        
+
         let to = packet.to;
-        
+
         if let Some(tx) = connections.get(&packet.to){
             if tx.capacity() > 0 && tx.blocking_send(packet).is_err() {
                 remove = true;
             }
         }
-        
+
         if remove{
             connections.remove(&to);
         }

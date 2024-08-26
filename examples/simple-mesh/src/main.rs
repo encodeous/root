@@ -86,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
             },
         );
     }
+    saved_state.router.links.retain(|k, _| {
+        saved_state.links.contains_key(k)
+    });
     
     let mq = start_router(saved_state, OperatingState{
         health: Default::default(),

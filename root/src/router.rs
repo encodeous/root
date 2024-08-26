@@ -149,7 +149,7 @@ impl<T: RoutingSystem> Router<T> {
             if let Some(link) = &route.link {
                 // this should always be true if the next hop exists
                 // check if link still exists
-                if !self.links.contains_key(link){
+                if !self.links.contains_key(link) || self.links.get(link).unwrap().link_cost == INF{
                     route.metric = INF;
                     if !route.retracted{
                         retractions.push(route.source.clone());
