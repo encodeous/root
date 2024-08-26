@@ -368,26 +368,22 @@ fn handle_packet(
             } else {
                 // do routing
                 if let Some(route) = ps.router.routes.get(&dst_id) {
-                    if let Some(nh) = &route.next_hop {
-                        if os.log_routing {
-                            info!("TRT sender: {}, dst: {}, nh: {}", sender_id, dst_id, nh);
-                        }
-                        // forward packet
-                        if let Some(link) = route.link {
-                            if let Some(netlink) = ps.links.get(&link) {
-                                mq.outbound.send(
-                                    QueuedPacket{
-                                        to: netlink.neigh_addr.clone(),
-                                        packet: TraceRoute {
-                                            dst_id,
-                                            sender_id,
-                                            path,
-                                        },
-                                        failure_event: NoEvent
-                                    }
-                                )?;
+                    if os.log_routing {
+                        info!("TRT sender: {}, dst: {}, nh: {}", sender_id, dst_id, route.next_hop);
+                    }
+                    // forward packet
+                    if let Some(netlink) = ps.links.get(&route.link) {
+                        mq.outbound.send(
+                            QueuedPacket{
+                                to: netlink.neigh_addr.clone(),
+                                packet: TraceRoute {
+                                    dst_id,
+                                    sender_id,
+                                    path,
+                                },
+                                failure_event: NoEvent
                             }
-                        }
+                        )?;
                     }
                 }
             }
@@ -449,27 +445,23 @@ fn route_packet(
     } else {
         // do routing
         if let Some(route) = ps.router.routes.get(&dst_id) {
-            if let Some(nh) = &route.next_hop {
-                if os.log_routing {
-                    info!("DP sender: {}, dst: {}, nh: {}", sender_id, dst_id, nh);
-                }
-                // forward packet
-                if let Some(link) = route.link {
-                    if let Some(netlink) = ps.links.get(&link) {
-                        mq.outbound.send(
-                            QueuedPacket{
-                                to: netlink.neigh_addr,
-                                packet: NetPacket::Deliver {
-                                    dst_id,
-                                    sender_id,
-                                    data,
-                                },
-                                failure_event: NoEvent
-                            }
-                        )?;
-                        return Ok(());
+            if os.log_routing {
+                info!("DP sender: {}, dst: {}, nh: {}", sender_id, dst_id, route.next_hop);
+            }
+            // forward packet
+            if let Some(netlink) = ps.links.get(&route.link) {
+                mq.outbound.send(
+                    QueuedPacket{
+                        to: netlink.neigh_addr,
+                        packet: NetPacket::Deliver {
+                            dst_id,
+                            sender_id,
+                            data,
+                        },
+                        failure_event: NoEvent
                     }
-                }
+                )?;
+                return Ok(());
             }
         }
     }
@@ -548,11 +540,11 @@ fn handle_command(
             for (addr, route) in &ps.router.routes {
                 rtable.push(
                     format!("{addr} - via: {}, nh: {}, c: {}, seq: {}, fd: {}, ret: {}",
-                            route.link.unwrap_or(Uuid::nil()),
-                            route.next_hop.clone().unwrap_or("?".to_string()),
+                            route.link,
+                            route.next_hop.clone(),
                             route.metric,
                             route.source.data.seqno,
-                            route.fd.unwrap_or(INF),
+                            route.fd,
                             route.retracted
                     ))
             }
@@ -585,22 +577,20 @@ fn handle_command(
             }
             let node = split[1];
             if let Some(nh) = ps.router.routes.get(node) {
-                if let Some(link) = nh.link {
-                    if let Some(netlink) = ps.links.get(&link) {
-                        let s_addr = ps.router.address.clone();
-                        let naddr = netlink.neigh_addr;
-                        mq.outbound.send(
-                            QueuedPacket{
-                                to: naddr,
-                                packet: TraceRoute {
-                                    path: vec![],
-                                    dst_id: node.to_string(),
-                                    sender_id: s_addr,
-                                },
-                                failure_event: NoEvent
-                            }
-                        )?;
-                    }
+                if let Some(netlink) = ps.links.get(&nh.link) {
+                    let s_addr = ps.router.address.clone();
+                    let naddr = netlink.neigh_addr;
+                    mq.outbound.send(
+                        QueuedPacket{
+                            to: naddr,
+                            packet: TraceRoute {
+                                path: vec![],
+                                dst_id: node.to_string(),
+                                sender_id: s_addr,
+                            },
+                            failure_event: NoEvent
+                        }
+                    )?;
                 }
             }
         }
