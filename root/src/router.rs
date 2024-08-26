@@ -350,9 +350,10 @@ impl<T: RoutingSystem> Router<T> {
                     } else if self.address == *source {
                         // we are the intended recipient, so we can broadcast this!
                         increment(&mut self.seqno);
-                        if seqno_less_than(self.seqno, cur_seqno){
+                        if seqno_less_than(self.seqno, *seqno){
                             self.seqno = cur_seqno; // did our node go to sleep? we have less seqno than what others are requesting.
                             // MAKE SURE TO ENABLE MAC IN PROD
+                            warn!("Desynchronized sequence number, did this node suffer data loss? Ensure MAC is enabled to prevent DOS attacks.")
                         }
                         self.broadcast_route_for.insert(self.address.clone());
                     } else {
