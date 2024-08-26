@@ -7,8 +7,8 @@ use crate::routing::IPV4System;
 
 #[derive(Serialize, Deserialize)]
 pub enum NetPacket{
-    Ping(<IPV4System as RoutingSystem>::Link, bool),
-    Pong(<IPV4System as RoutingSystem>::Link, bool),
+    Ping(<IPV4System as RoutingSystem>::Link),
+    Pong(<IPV4System as RoutingSystem>::Link),
     Routing {
         link_id: <IPV4System as RoutingSystem>::Link,
         data: Packet<IPV4System>
@@ -26,10 +26,6 @@ pub enum NetPacket{
         sender_id: <IPV4System as RoutingSystem>::NodeAddress,
         data: RoutedPacket
     },
-    Undeliverable{
-        dst_id: <IPV4System as RoutingSystem>::NodeAddress,
-        sender_id: <IPV4System as RoutingSystem>::NodeAddress
-    },
     TraceRoute{
         dst_id: <IPV4System as RoutingSystem>::NodeAddress,
         sender_id: <IPV4System as RoutingSystem>::NodeAddress,
@@ -44,5 +40,8 @@ pub enum RoutedPacket{
     TracedRoute{
         path: Vec<<IPV4System as RoutingSystem>::NodeAddress>
     },
-    Message(String)
+    Message(String),
+    Undeliverable{
+        to: <IPV4System as RoutingSystem>::NodeAddress
+    }
 }

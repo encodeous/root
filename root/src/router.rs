@@ -248,13 +248,12 @@ impl<T: RoutingSystem> Router<T> {
     }
     /// you should call this after calling update routes, otherwise the seqno metrics published is not the best...
     pub fn broadcast_seqno_updates(&mut self) {
-        let tmp_seqno = self.broadcast_route_for.clone();
+        let tmp_seqno = self.broadcast_route_for.drain().collect::<Vec<T::NodeAddress>>();
         for source in tmp_seqno {
             if let Some(pkt) = self.create_seqno_packet(&source) {
                 self.write_broadcast_packet(&pkt);
             }
         }
-        self.broadcast_route_for.clear();
     }
 
     /// Creates a seqno packet using the data we already have
