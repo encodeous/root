@@ -45,7 +45,7 @@ pub fn start_router(ps: PersistentState, os: OperatingState) -> MessageQueue{
     });
     let tmq = mq.clone();
     tokio::task::spawn_blocking(||{
-        main_loop(ps, os, tmq, mrx).context("Packet Sender Thread Failed: ").unwrap();
+        main_loop(ps, os, tmq, mrx).context("Main Thread Failed: ").unwrap();
     });
     tokio::spawn(server(mq.clone()));
     let tmq = mq.clone();
@@ -173,7 +173,7 @@ async fn server(mq: MessageQueue) -> anyhow::Result<()> {
                         tmq.main.send(InboundPacket {
                             address: addr,
                             packet
-                        }).unwrap();
+                        })?;
                     }
                     anyhow::Result::<()>::Ok(())
                 };
