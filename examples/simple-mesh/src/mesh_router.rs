@@ -463,6 +463,7 @@ fn handle_routed_packet(
     pkt: RoutedPacket,
     src: <IPV4System as RoutingSystem>::NodeAddress
 ) -> anyhow::Result<()> {
+    trace!("Handling routed packet from {src}: {}", json!(pkt));
     match pkt {
         RoutedPacket::Ping => {
             mq.main.send(RoutePacket {
@@ -555,7 +556,7 @@ fn handle_command(
             mq.main.send(RoutePacket {
                 to: node.to_string(),
                 from: ps.router.address.clone(),
-                packet: RoutedPacket::Pong
+                packet: RoutedPacket::Ping
             })?;
         }
         "traceroute" | "tr" => {
