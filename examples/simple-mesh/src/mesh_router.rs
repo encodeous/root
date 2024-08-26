@@ -82,10 +82,18 @@ fn packet_sender(
             tokio::spawn(link_io(mq.clone(), rx, packet.to));
         }
 
+        let mut remove = false;
+        
+        let to = packet.to;
+        
         if let Some(tx) = connections.get(&packet.to){
-            if tx.capacity() >  0 {
-                tx.blocking_send(packet)?;
+            if tx.capacity() > 0 && tx.blocking_send(packet).is_err() {
+                remove = true;
             }
+        }
+        
+        if remove{
+            connections.remove(&to);
         }
     }
     Ok(())
