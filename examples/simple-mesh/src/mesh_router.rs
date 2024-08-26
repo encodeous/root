@@ -176,7 +176,10 @@ async fn server(mq: MessageQueue) -> anyhow::Result<()> {
                     anyhow::Result::<()>::Ok(())
                 };
 
-                reader.await.unwrap();
+                if let Err(x) = reader.await{
+                    // ignored
+                    debug!("Error in main thread: {x}");
+                }
             });
         }
     }
