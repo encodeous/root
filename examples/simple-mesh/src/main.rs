@@ -36,15 +36,9 @@ use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::state::MainLoopEvent::DispatchCommand;
 
-macro_rules! ml {
-  ( $mutex_arc:expr ) => {
-    $mutex_arc.lock().unwrap()
-  };
-}
-
-async fn save_state(state: Arc<Mutex<SyncState>>) -> anyhow::Result<()> {
+async fn save_state(ps: PersistentState) -> anyhow::Result<()> {
     let content = {
-        serde_json::to_vec(&ml!(state).ps)?
+        serde_json::to_vec(&ps)?
     };
     fs::write("./config.json", content).await?;
     debug!("Saved State");

@@ -25,6 +25,7 @@ use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::routing::IPV4System;
+use crate::save_state;
 use crate::state::{LinkHealth, MainLoopEvent, MessageQueue, OperatingState, PersistentState, QueuedPacket, SyncState};
 use crate::state::MainLoopEvent::{DispatchPingLink, InboundPacket, NoEvent, PingResultFailed, RoutePacket, Shutdown, TimerPingUpdate, TimerRouteUpdate};
 
@@ -257,6 +258,10 @@ fn main_loop(
             }
         }
     }
+    
+    info!("The router has shutdown, saving state...");
+    
+    tokio::spawn(save_state(ps));
     Ok(())
 }
 
