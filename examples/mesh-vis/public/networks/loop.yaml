@@ -1,0 +1,15 @@
+config:
+  broadcast_routes: true # should nodes send updates to each other, since this version of the visualiser does not store routes for each node, this should be true
+  broadcast_seqno: true # should nodes broadcast their saved seqno when another node requests for it?
+  update_routes: true # should node calculate routes based on what their neighbour has sent them
+neighbours:
+  - 1 2 1
+  - 2 3 1
+  - 3 4 1
+  - 4 5 1
+  - 5 6 1
+  - 6 7 1
+  - 7 8 1
+  - 8 9 1
+  - 1 9 1
+  - 9 10 1 # cut this off, and you can see that there is no cycle formed
