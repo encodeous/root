@@ -46,7 +46,7 @@ pub fn tick_state(state: &mut State) {
                 node.router.solve_starvation();
             }
         }
-
+        
         if broadcast_routes {
             node.router.broadcast_routes();
         }

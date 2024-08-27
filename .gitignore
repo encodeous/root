@@ -25,3 +25,5 @@ Cargo.lock
 /examples/graph-mesh/graph-mesh
 
 .idea
+
+/examples/simple-mesh/config.json

@@ -14,9 +14,6 @@ pub trait RoutingSystem {
     type Link: RootKey + RootData;
     /// An opaque implementation that allows the node to sign packets
     type MACSystem: MACSystem<Self>;
-    fn config() -> ProtocolParams {
-        Default::default()
-    }
 }
 
 pub trait RootData: Clone + Serialize + DeserializeOwned + Sized {}
@@ -37,16 +34,3 @@ pub trait MACSystem<T: RoutingSystem + ?Sized>: Default {
 }
 pub type MAC<V, T> = <<T as RoutingSystem>::MACSystem as MACSystem<T>>::MACSignatureType<V>;
 
-/// Appendix B. Protocol Parameters
-pub struct ProtocolParams {
-    pub dedup_ttl: Duration,
-    pub cleanup_timer: Duration,
-}
-impl Default for ProtocolParams {
-    fn default() -> Self {
-        Self {
-            dedup_ttl: Duration::from_secs(60),
-            cleanup_timer: Duration::from_secs(15),
-        }
-    }
-}

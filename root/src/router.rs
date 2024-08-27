@@ -435,12 +435,12 @@ impl<T: RoutingSystem> Router<T> {
                     table_route.metric = update.metric;
                 }
             }
-            else if update.metric != INF {
-                // we add the route if it is not INF, and it is not the next hop
+            else if update.metric != INF || selected {
+                // we add the route if it is not INF, or if it is selected
                 let route = ExternalRoute {
                 source: update.source.clone(),
                     metric: update.metric,
-                    retracted: false
+                    retracted: update.metric == INF
                 };
                 neighbour.routes.insert(src.clone(), route);
             }
