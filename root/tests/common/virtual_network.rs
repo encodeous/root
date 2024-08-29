@@ -77,7 +77,7 @@ impl VirtualSystem{
             if let Some(router) = self.routers.iter_mut().find(|x|x.address == *node){
                 for (packet, link) in packets{
                     if let Some(neigh_addr) = router.links.get(link).map(|x| x.addr.clone()){
-                        router.handle_packet(packet, link, &neigh_addr);
+                        router.handle_packet(packet, link, &neigh_addr).unwrap();
                     }
                 }
             }

@@ -270,6 +270,10 @@ fn main_loop(
                 // do nothing
             }
         }
+        
+        for warn in ps.router.warnings.drain(..){
+            warn!("{warn:?}");
+        }
     }
 
     info!("The router has shutdown, saving state...");
@@ -322,7 +326,7 @@ fn handle_packet(
                     info!("RP From: {}, {}, via {}", link.neigh_node, json!(data), link.link);
                 }
                 let n_nid = link.neigh_node.clone();
-                ps.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid);
+                ps.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid)?;
                 ps.router.update();
                 write_routing_packets(ps, os, mq)?;
             }

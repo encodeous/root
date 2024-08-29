@@ -10,13 +10,8 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_staticfile::Static;
 use hyper_util::rt::TokioIo;
 use mime_guess::Mime;
-use root::concepts::packet::Packet;
-use root::framework::{MACSignature, RoutingSystem};
-use root::router::{Router, INF, DummyMAC, NoMACSystem};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
+use root::framework::RoutingSystem;
+use root::router::{Router, DummyMAC, NoMACSystem};
 use std::fs::File;
 use std::io;
 use std::io::{BufRead, Error};
@@ -36,12 +31,6 @@ mod vis;
 
 pub struct GraphSystem {
     router: Router<Self>,
-}
-
-impl Clone for GraphSystem {
-    fn clone(&self) -> Self {
-        todo!() // don't actually need to clone, rust's type system is too strict lol
-    }
 }
 
 impl RoutingSystem for GraphSystem {

@@ -1,7 +1,7 @@
 use crate::router::INF;
 use std::cmp::min;
 
-/// Compares whether a < b
+/// Compares whether a < b mod 65536
 ///
 /// # Arguments
 ///

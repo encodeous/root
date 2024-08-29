@@ -1,8 +1,4 @@
 use crate::graph_parse::State;
-use crate::{DummyMAC, GraphSystem};
-use root::concepts::packet::Packet;
-use serde_json::json;
-use std::collections::BTreeMap;
 
 pub fn tick_state(state: &mut State) {
     println!("[tick] New Tick Started");

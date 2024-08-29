@@ -1,13 +1,13 @@
 use crate::framework::{MAC, RoutingSystem};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use educe::Educe;
 
-/// 3.2.6. The Route Table
-#[derive(Serialize, Deserialize, Educe)]
-#[serde(bound = "")]
+#[derive(Educe)]
 #[educe(Clone(bound()))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""))]
 pub struct Route<T: RoutingSystem + ?Sized> {
     /// the source and seqno for which this route is advertised
     pub source: MAC<Source<T>, T>,
@@ -23,9 +23,9 @@ pub struct Route<T: RoutingSystem + ?Sized> {
     pub retracted: bool
 }
 
-#[derive(Serialize, Deserialize, Educe)]
-#[serde(bound = "")]
+#[derive(Educe)]
 #[educe(Clone(bound()))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""))]
 pub struct ExternalRoute<T: RoutingSystem + ?Sized> {
     /// the source and seqno for which this route is advertised
     pub source: MAC<Source<T>, T>,
@@ -35,8 +35,9 @@ pub struct ExternalRoute<T: RoutingSystem + ?Sized> {
     pub retracted: bool
 }
 
-#[derive(Serialize, Deserialize, Educe)]
+#[derive(Educe)]
 #[educe(Clone(bound()))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""))]
 pub struct Source<T: RoutingSystem + ?Sized> {
     pub addr: T::NodeAddress,
     pub seqno: u16,

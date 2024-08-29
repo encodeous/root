@@ -1,12 +1,15 @@
 use std::collections::HashMap;
-
+use cfg_if::cfg_if;
+use educe::Educe;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::concepts::route::{ExternalRoute};
-use crate::framework::RoutingSystem;
+use crate::framework::{RoutingSystem};
 
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
+#[derive(Educe)]
+#[educe(Clone(bound()))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""))]
 pub struct Neighbour<T: RoutingSystem + ?Sized> {
     /// the physical network link id, the pair (link, addr) should be unique
     pub link: T::Link,
