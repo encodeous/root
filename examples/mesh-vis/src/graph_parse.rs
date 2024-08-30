@@ -206,10 +206,9 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
             };
             for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
                 sys.router.links.insert(*neigh, Neighbour{
-                    link_cost: *metric,
+                    metric: *metric,
                     addr: *neigh,
-                    routes: HashMap::new(),
-                    link: *neigh
+                    routes: HashMap::new()
                 });
             }
             nodes.push(sys);
@@ -344,7 +343,7 @@ pub fn save(state: &State) -> Yaml {
                         "{} {} {}",
                         addr,
                         n_addr,
-                        neigh.link_cost
+                        neigh.metric
                     )
                         .as_str(),
                 ));

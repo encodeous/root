@@ -64,8 +64,7 @@ async fn main() -> anyhow::Result<()> {
             *link,
             Neighbour {
                 addr: netlink.neigh_node.clone(),
-                link: netlink.link,
-                link_cost: INF,
+                metric: INF,
                 routes: HashMap::new(),
             },
         );

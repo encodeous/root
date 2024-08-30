@@ -68,6 +68,12 @@ impl<T: RoutingSystem> Router<T> {
         }
     }
 
+    pub fn set_link_metric(&mut self, link: &T::Link, new_metric: u16){
+        if let Some(neigh) = self.links.get_mut(link){
+            neigh.metric = new_metric;
+        }
+    }
+    
     /// updates the state of the router, does not broadcast routes
     pub fn update(&mut self){
         self.update_routes();
@@ -146,7 +152,7 @@ impl<T: RoutingSystem> Router<T> {
         for (_addr, route) in &mut self.routes {
             let link = &route.link;
             // check if link still exists
-            if !self.links.contains_key(link) || self.links.get(link).unwrap().link_cost == INF{
+            if !self.links.contains_key(link) || self.links.get(link).unwrap().metric == INF{
                 route.metric = INF;
                 if !route.retracted{
                     retractions.push(route.source.clone());
@@ -155,16 +161,16 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
         for (link, neigh) in &mut self.links {
-            if neigh.link_cost == 0 {
+            if neigh.metric == 0 {
                 self.warnings.push_back(MetricIsZero {link: link.clone()});
-                neigh.link_cost = 1;
+                neigh.metric = 1;
             }
             for (src, neigh_route) in &neigh.routes {
                 if *src == self.address{
                     continue; // we can safely ignore a route to ourself
                 }
 
-                let metric = sum_inf(neigh.link_cost, neigh_route.metric);
+                let metric = sum_inf(neigh.metric, neigh_route.metric);
 
                 // if the table has the route
                 if let Some(table_route) = self.routes.get_mut(src) {

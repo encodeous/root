@@ -21,10 +21,9 @@ impl VirtualSystem{
                         if a == id {b} else {a}
                     };
                     router.links.insert(*lid, Neighbour{
-                        link: *lid,
                         addr: nid.to_string(),
                         routes: Default::default(),
-                        link_cost: *metric,
+                        metric: *metric,
                     });
                 }
             }
@@ -39,7 +38,7 @@ impl VirtualSystem{
     pub fn update_edge(&mut self, edge_id: i32, metric: u16){
         for router in &mut self.routers{
             router.links.entry(edge_id).and_modify(|edge| {
-                edge.link_cost = metric
+                edge.metric = metric
             });
         }
     }

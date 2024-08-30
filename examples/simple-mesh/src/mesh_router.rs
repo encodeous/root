@@ -347,8 +347,7 @@ fn handle_packet(
                     link_id,
                     Neighbour {
                         addr: node_id.clone(),
-                        link: link_id,
-                        link_cost: INF,
+                        metric: INF,
                         routes: HashMap::new(),
                     },
                 );
@@ -427,7 +426,7 @@ fn update_link_health(
     new_ping: Duration,
 ) -> anyhow::Result<()> {
     if let Some(neigh) = ps.router.links.get_mut(&link) {
-        neigh.link_cost = {
+        neigh.metric = {
             if new_ping == Duration::MAX {
                 INF
             } else {
@@ -655,8 +654,7 @@ fn handle_command(
                     netlink.link,
                     Neighbour {
                         addr: netlink.neigh_node.clone(),
-                        link: netlink.link,
-                        link_cost: INF,
+                        metric: INF,
                         routes: HashMap::new(),
                     },
                 );
