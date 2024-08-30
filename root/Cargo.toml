@@ -1,7 +1,12 @@
 [package]
 name = "root"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
+license-file = "../LICENSE"
+keywords = ["routing", "network", "io-free"]
+categories = ["network-programming"]
+repository = "https://github.com/encodeous/root"
+readme = "../README.md"
 
 [dependencies]
 anyhow = "1.0.86"
