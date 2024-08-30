@@ -1,4 +1,4 @@
-![Logo](./assets/logo.png)
+# root
 
 [root](https://github.com/encodeous/root) is an abstract I/O-free implementation of the [Babel Routing Protocol](https://datatracker.ietf.org/doc/html/rfc8966) with its own take. It provides a high-level framework to design dynamic, fault-tolerant networks.
 
