@@ -119,7 +119,7 @@ Bob's routes in step 1:
 - eve: metric: 1, next_hop: eve
 Bob's routes in step 2:
 - eve: metric: 1, next_hop: eve
-    - alice: metric: 2, next_hop: eve
+- alice: metric: 2, next_hop: eve
 ```
 > [!NOTE]  
 > You can try running this example yourself, its files are located in `./examples/super-simple`
