@@ -20,7 +20,7 @@ pub struct Router<T: RoutingSystem + ?Sized> {
     #[serde(skip_serializing, skip_deserializing)]
     pub links: HashMap<T::Link, Neighbour<T>>,
     /// Source, Route
-    /// #[serde_as(as = "Vec<(_, _)>")]
+    #[serde(skip_serializing, skip_deserializing)]
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
     #[serde_as(as = "Vec<(_, _)>")]
