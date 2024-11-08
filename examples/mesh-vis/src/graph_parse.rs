@@ -65,21 +65,15 @@ pub fn parse_seqno_pair(yaml: &Yaml) -> anyhow::Result<(u8, u16)> {
 
 pub fn serialize_route(rt: &Route<GraphSystem>, cur_routes: &mut Vec<Yaml>) {
     let Source { addr, seqno } = rt.source.data;
-
-    if let Some(next_hop) = rt.next_hop {
-        // not a self-route
-        cur_routes.push(Yaml::from_str(
-            format!(
-                "{addr} {} {seqno} {} {}",
-                next_hop,
-                rt.metric,
-                rt.fd.unwrap_or(INF)
-            )
+    cur_routes.push(Yaml::from_str(
+        format!(
+            "{addr} {} {seqno} {} {}",
+            rt.next_hop,
+            rt.metric,
+            rt.fd
+        )
             .as_str(),
-        ));
-    } else {
-        cur_routes.push(Yaml::from_str(format!("{addr} - {seqno} self").as_str()));
-    }
+    ));
 }
 
 pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
@@ -90,31 +84,18 @@ pub fn parse_route(route: &str) -> anyhow::Result<Route<GraphSystem>> {
             seqno: u16::from_str(values[2])?,
         },
     };
-    if !route.ends_with("self") {
-        ensure!(values.len() == 5, "Expected five elements in regular route");
-        let next_hop = u8::from_str(values[1])?;
-        let metric = u16::from_str(values[3])?;
-        let fd = u16::from_str(values[4])?;
-        Ok(Route {
-            source: source.clone(),
-            metric,
-            next_hop: Some(next_hop),
-            fd: if fd == INF { None } else { Some(fd) },
-            link: Some(next_hop),
-            retracted: false
-        })
-    } else {
-        // self route
-        ensure!(values.len() == 4, "Expected four elements in self route");
-        Ok(Route {
-            source,
-            metric: 0,
-            next_hop: None,
-            fd: None,
-            link: None,
-            retracted: false
-        })
-    }
+    ensure!(values.len() == 5, "Expected five elements in route");
+    let next_hop = u8::from_str(values[1])?;
+    let metric = u16::from_str(values[3])?;
+    let fd = u16::from_str(values[4])?;
+    Ok(Route {
+        source: source.clone(),
+        metric,
+        next_hop,
+        fd,
+        link: next_hop,
+        retracted: false
+    })
 }
 
 pub fn load(state: &Yaml) -> anyhow::Result<State> {
@@ -225,10 +206,9 @@ pub fn load(state: &Yaml) -> anyhow::Result<State> {
             };
             for (_, neigh, metric) in adj.iter().filter(|x| x.0 == *node) {
                 sys.router.links.insert(*neigh, Neighbour{
-                    link_cost: *metric,
+                    metric: *metric,
                     addr: *neigh,
-                    routes: HashMap::new(),
-                    link: *neigh
+                    routes: HashMap::new()
                 });
             }
             nodes.push(sys);
@@ -363,7 +343,7 @@ pub fn save(state: &State) -> Yaml {
                         "{} {} {}",
                         addr,
                         n_addr,
-                        neigh.link_cost
+                        neigh.metric
                     )
                         .as_str(),
                 ));

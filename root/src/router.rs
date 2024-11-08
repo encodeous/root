@@ -4,32 +4,40 @@ use crate::concepts::route::{ExternalRoute, Route, Source};
 use crate::framework::{MAC, MACSignature, MACSystem, RootData, RoutingSystem};
 use crate::router::UpdateAction::{NoAction, Retraction, SeqnoUpdate};
 use crate::util::{increment, increment_by, seqno_less_than, sum_inf};
-use log::{error, warn};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use cfg_if::cfg_if;
 use educe::Educe;
-use serde_with::serde_as;
+use crate::feedback::{RoutingError, RoutingWarning};
+use crate::feedback::RoutingError::MACValidationFail;
+use crate::feedback::RoutingWarning::{DesynchronizedSeqno, MetricIsZero};
+
+cfg_if!{
+    if #[cfg(feature = "serde")] {
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+    }
+}
 
 pub const INF: u16 = 0xFFFF;
 
-#[serde_as]
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""), serde_as)]
 pub struct Router<T: RoutingSystem + ?Sized> {
-    #[serde(skip_serializing, skip_deserializing)]
+    #[cfg_attr(feature = "serde", serde(skip_serializing, skip_deserializing))]
     pub links: HashMap<T::Link, Neighbour<T>>,
     /// Source, Route
     #[serde(skip_serializing, skip_deserializing)]
     pub routes: HashMap<T::NodeAddress, Route<T>>,
     pub address: T::NodeAddress,
-    #[serde_as(as = "Vec<(_, _)>")]
+    #[cfg_attr(feature = "serde", serde_as(as = "Vec<(_, _)>"))]
     pub seqno_requests: HashMap<T::NodeAddress, u16>,
     pub broadcast_route_for: HashSet<T::NodeAddress>,
     pub outbound_packets: Vec<OutboundPacket<T>>,
     pub seqno: u16,
-    #[serde(skip_serializing, skip_deserializing)]
-    pub mac_sys: T::MACSystem
+    #[cfg_attr(feature = "serde", serde(skip_serializing, skip_deserializing))]
+    pub mac_sys: T::MACSystem,
+    /// drain this regularly for warnings
+    #[cfg_attr(feature = "serde", serde(skip_serializing, skip_deserializing))]
+    pub warnings: VecDeque<RoutingWarning<T>>
 }
 
 #[derive(Eq, PartialEq)]
@@ -40,6 +48,12 @@ enum UpdateAction {
 }
 
 impl<T: RoutingSystem> Router<T> {
+    fn warn(&mut self, warning: RoutingWarning<T>){
+        if self.warnings.len() > T::MAX_WARN_LENGTH{
+            self.warnings.pop_front();
+        }
+        self.warnings.push_back(warning);
+    }
     pub fn new(address: T::NodeAddress) -> Self {
         Self{
             links: HashMap::new(),
@@ -49,10 +63,17 @@ impl<T: RoutingSystem> Router<T> {
             broadcast_route_for: HashSet::new(),
             outbound_packets: Vec::new(),
             seqno: 0,
-            mac_sys: Default::default()
+            mac_sys: Default::default(),
+            warnings: Default::default()
         }
     }
 
+    pub fn set_link_metric(&mut self, link: &T::Link, new_metric: u16){
+        if let Some(neigh) = self.links.get_mut(link){
+            neigh.metric = new_metric;
+        }
+    }
+    
     /// updates the state of the router, does not broadcast routes
     pub fn update(&mut self){
         self.update_routes();
@@ -131,7 +152,7 @@ impl<T: RoutingSystem> Router<T> {
         for (_addr, route) in &mut self.routes {
             let link = &route.link;
             // check if link still exists
-            if !self.links.contains_key(link) || self.links.get(link).unwrap().link_cost == INF{
+            if !self.links.contains_key(link) || self.links.get(link).unwrap().metric == INF{
                 route.metric = INF;
                 if !route.retracted{
                     retractions.push(route.source.clone());
@@ -140,16 +161,16 @@ impl<T: RoutingSystem> Router<T> {
             }
         }
         for (link, neigh) in &mut self.links {
-            if neigh.link_cost == 0 {
-                warn!("Metric over link {} to {} should not be 0, this has been corrected", json!(neigh.link), json!(neigh.addr));
-                neigh.link_cost = 1;
+            if neigh.metric == 0 {
+                self.warnings.push_back(MetricIsZero {link: link.clone()});
+                neigh.metric = 1;
             }
             for (src, neigh_route) in &neigh.routes {
                 if *src == self.address{
                     continue; // we can safely ignore a route to ourself
                 }
 
-                let metric = sum_inf(neigh.link_cost, neigh_route.metric);
+                let metric = sum_inf(neigh.metric, neigh_route.metric);
 
                 // if the table has the route
                 if let Some(table_route) = self.routes.get_mut(src) {
@@ -284,13 +305,11 @@ impl<T: RoutingSystem> Router<T> {
         data: &MAC<Packet<T>, T>,
         link: &T::Link,
         neigh: &T::NodeAddress
-    ) {
+    ) -> Result<(), RoutingError<T>> {
         if !self.mac_sys.validate(data, neigh) {
-            error!(
-                "Rejected packet from {}, invalid neighbour MAC. Is there a MITM attack?",
-                json!(neigh)
-            );
-            return;
+            return Err(MACValidationFail {
+                link: link.clone()
+            });
         }
 
         // if exists, contains the address we should broadcast
@@ -299,7 +318,7 @@ impl<T: RoutingSystem> Router<T> {
         match data.data() {
             Packet::UrgentRouteUpdate(route) => {
                 // println!("[dbg] {} got packet {} from {}", json!(self.address), json!(data), json!(neigh));
-                match self.handle_neighbour_route_update(route, link, neigh) {
+                match self.handle_neighbour_route_update(route, link, neigh)? {
                     SeqnoUpdate => {
                         // let's rebroadcast this change, our seqno has increased!
                         self.broadcast_route_for
@@ -314,7 +333,7 @@ impl<T: RoutingSystem> Router<T> {
             }
             Packet::BatchRouteUpdate { routes } => {
                 for route in routes {
-                    self.handle_neighbour_route_update(route, link, neigh); // we dont need to worry about seqno updates and retractions
+                    self.handle_neighbour_route_update(route, link, neigh)?; // we dont need to worry about seqno updates and retractions
                 }
             }
             Packet::SeqnoRequest { source, seqno } => {
@@ -331,11 +350,15 @@ impl<T: RoutingSystem> Router<T> {
                         self.broadcast_route_for.insert(source.clone());
                     } else if self.address == *source {
                         // we are the intended recipient, so we can broadcast this!
+                        let original = self.seqno;
                         increment(&mut self.seqno);
-                        if seqno_less_than(self.seqno, *seqno){
+                        if seqno_less_than(self.seqno, *seqno) && T::TRUST_RESYNC_SEQNO{
                             self.seqno = *seqno; // did our node go to sleep? we have less seqno than what others are requesting.
                             // MAKE SURE TO ENABLE MAC IN PROD
-                            warn!("Updating desynchronized sequence number, did this node suffer data loss? Ensure MAC is enabled to prevent DOS attacks.")
+                            self.warn(DesynchronizedSeqno {
+                                old_seqno: original,
+                                new_seqno: self.seqno
+                            });
                         }
                         self.broadcast_route_for.insert(self.address.clone());
                     } else {
@@ -361,6 +384,7 @@ impl<T: RoutingSystem> Router<T> {
                 }
             }
         }
+        Ok(())
     }
 
     pub fn get_seqno_for(&self, addr: &T::NodeAddress) -> Option<u16> {
@@ -380,29 +404,26 @@ impl<T: RoutingSystem> Router<T> {
         update: &RouteUpdate<T>,
         link: &T::Link,
         neigh: &T::NodeAddress
-    ) -> UpdateAction {
+    ) -> Result<UpdateAction, RoutingError<T>> {
         let Source { addr: src, seqno } = update.source.data();
 
         if *src == self.address{
             // just ignore this
-            return NoAction;
+            return Ok(NoAction);
         }
 
         // validate update
         if !self.mac_sys.validate(&update.source, src) {
-            error!(
-                "Rejected route update for {} from {}, invalid source MAC. Is there a MITM attack?",
-                json!(src),
-                json!(neigh)
-            );
-            return NoAction;
+            return Err(MACValidationFail {
+                link: link.clone()
+            });
         }
 
         let mut action = NoAction;
         let stored_seqno = self.get_seqno_for(src);
         if let Some(d_seqno) = stored_seqno {
             if seqno_less_than(*seqno, d_seqno) {
-                return NoAction; // our neighbour is probably out of date. seqno cannot decrease
+                return Ok(NoAction); // our neighbour is probably out of date. seqno cannot decrease
             } else if seqno_less_than(d_seqno, *seqno) {
                 action = SeqnoUpdate; // our neighbour has a higher seqno than us!
             }
@@ -435,17 +456,17 @@ impl<T: RoutingSystem> Router<T> {
                     table_route.metric = update.metric;
                 }
             }
-            else if update.metric != INF {
-                // we add the route if it is not INF, and it is not the next hop
+            else if update.metric != INF || selected {
+                // we add the route if it is not INF, or if it is selected
                 let route = ExternalRoute {
                 source: update.source.clone(),
                     metric: update.metric,
-                    retracted: false
+                    retracted: update.metric == INF
                 };
                 neighbour.routes.insert(src.clone(), route);
             }
         }
-        action
+        Ok(action)
     }
 }
 
@@ -454,9 +475,9 @@ pub struct NoMACSystem {
 
 }
 
-#[derive(Serialize, Deserialize, Educe)]
+#[derive(Educe)]
 #[educe(Clone(bound()))]
-#[serde(bound = "")]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize), serde(bound = ""))]
 pub struct DummyMAC<V: RootData>{
     pub data: V,
 }

@@ -1,8 +1,7 @@
 {
     "graphs": {
         "default.yaml": "Simple Weighted Graph",
-        "starvation.yaml": "Graph in Starvation",
-        "unweighted.yaml": "Simple Unweghted Graph",
+        "unweighted.yaml": "Simple Unweighted Graph",
         "loop.yaml": "Loop Avoidance",
         "fragile.yaml": "Fragile Network"
     }

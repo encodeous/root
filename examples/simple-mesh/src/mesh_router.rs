@@ -5,29 +5,24 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
 use std::process::exit;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context};
 use crossbeam_channel::{Receiver, unbounded};
-use futures::{SinkExt, TryStreamExt};
 use log::{debug, error, info, trace, warn};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, timeout};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use root::concepts::neighbour::Neighbour;
-use root::concepts::packet::OutboundPacket;
 use root::framework::RoutingSystem;
 use root::router::{DummyMAC, INF};
 use crate::link::NetLink;
 use crate::packet::{NetPacket, RoutedPacket};
 use crate::packet::NetPacket::{LinkRequest, Ping, Pong, TraceRoute};
 use crate::routing::IPV4System;
-use crate::state::{LinkHealth, MainLoopEvent, MessageQueue, OperatingState, PersistentState, QueuedPacket, SyncState};
+use crate::state::{LinkHealth, MainLoopEvent, MessageQueue, OperatingState, PersistentState, QueuedPacket};
 use crate::state::MainLoopEvent::{DispatchPingLink, InboundPacket, NoEvent, PingResultFailed, RoutePacket, Shutdown, TimerPingUpdate, TimerRouteUpdate};
 
 pub fn start_router(ps: PersistentState, os: OperatingState) -> MessageQueue{
@@ -110,6 +105,7 @@ async fn link_io(
         let res = timeout(Duration::from_millis(5000), TcpStream::connect(SocketAddrV4::new(dst, 9988))).await;
 
         let mut status: anyhow::Result<()> = Ok(());
+        let mut fail = NoEvent;
 
         if let Ok(Ok(mut stream)) = res{
             debug!("Connected to {dst}");
@@ -118,6 +114,7 @@ async fn link_io(
                 let write = async {
                     for _ in 0..max(mr.len(), 1){
                         let packet = mr.recv().await.ok_or(anyhow!("Stream Ended"))?;
+                        fail = packet.failure_event;
                         trace!("Writing packet: {} to {dst}", json!(packet.packet));
                         serde_json::to_writer(&mut bytes, &packet.packet)?;
                         stream.write_u32(bytes.len() as u32).await?;
@@ -140,6 +137,10 @@ async fn link_io(
         // failure
 
         if let Err(x) = status{
+            if let NoEvent = fail{}
+            else{
+                mq.main.send(fail)?;
+            }
             debug!("Error occurred while trying to write packet to {dst}: {x:?}");
         }
 
@@ -147,7 +148,10 @@ async fn link_io(
         
         while Instant::now() < wakeup{
             if let Ok(Some(packet)) = timeout(Duration::from_millis(100), mr.recv()).await{
-                mq.main.send(packet.failure_event)?;
+                if let NoEvent = packet.failure_event{}
+                else{
+                    mq.main.send(packet.failure_event)?;
+                }
             }
         }
     }
@@ -266,6 +270,10 @@ fn main_loop(
                 // do nothing
             }
         }
+        
+        for warn in ps.router.warnings.drain(..){
+            warn!("{warn:?}");
+        }
     }
 
     info!("The router has shutdown, saving state...");
@@ -318,7 +326,7 @@ fn handle_packet(
                     info!("RP From: {}, {}, via {}", link.neigh_node, json!(data), link.link);
                 }
                 let n_nid = link.neigh_node.clone();
-                ps.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid);
+                ps.router.handle_packet(&DummyMAC::from(data), &link_id, &n_nid)?;
                 ps.router.update();
                 write_routing_packets(ps, os, mq)?;
             }
@@ -339,8 +347,7 @@ fn handle_packet(
                     link_id,
                     Neighbour {
                         addr: node_id.clone(),
-                        link: link_id,
-                        link_cost: INF,
+                        metric: INF,
                         routes: HashMap::new(),
                     },
                 );
@@ -419,7 +426,7 @@ fn update_link_health(
     new_ping: Duration,
 ) -> anyhow::Result<()> {
     if let Some(neigh) = ps.router.links.get_mut(&link) {
-        neigh.link_cost = {
+        neigh.metric = {
             if new_ping == Duration::MAX {
                 INF
             } else {
@@ -647,8 +654,7 @@ fn handle_command(
                     netlink.link,
                     Neighbour {
                         addr: netlink.neigh_node.clone(),
-                        link: netlink.link,
-                        link_cost: INF,
+                        metric: INF,
                         routes: HashMap::new(),
                     },
                 );

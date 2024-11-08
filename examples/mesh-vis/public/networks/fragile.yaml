@@ -2,7 +2,6 @@ config:
   broadcast_routes: true # should nodes send updates to each other, since this version of the visualiser does not store routes for each node, this should be true
   broadcast_seqno: true # should nodes broadcast their saved seqno when another node requests for it?
   update_routes: true # should node calculate routes based on what their neighbour has sent them
-  refresh_interfaces: true # should we scan our interfaces for changes, i.e disconnect & metric change?
 neighbours:
   - 1 2 1
   - 1 3 1

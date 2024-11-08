@@ -1,28 +1,41 @@
 use std::hash::Hash;
-use std::time::Duration;
+use cfg_if::cfg_if;
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+cfg_if!{
+    if #[cfg(feature = "serde")] {
+        use serde::de::DeserializeOwned;
+        use serde::Serialize;
+    }
+}
 
 use crate::router::Router;
 
 pub trait RoutingSystem {
+    /// Maximal length that the warning log should be kept for, if the buffer is full, the oldest warning is dropped.
+    const MAX_WARN_LENGTH: usize = 1000;
+    /// Should the routing client trust seqno requests where the seqno > cur_seqno + 1. ENSURE MAC IS ENABLED
+    const TRUST_RESYNC_SEQNO: bool = true;
     /// Address of the node on the routing network, MUST be globally unique
-    type NodeAddress: Ord + PartialOrd + RootData + RootKey;
+    type NodeAddress: RootData + RootKey;
     /// A type that describes a physical interface or higher level concept that allows this node to talk to another node via some method
     /// Must be unique
-    type Link: RootKey + RootData;
+    type Link: RootData + RootKey;
     /// An opaque implementation that allows the node to sign packets
     type MACSystem: MACSystem<Self>;
-    fn config() -> ProtocolParams {
-        Default::default()
-    }
 }
 
-pub trait RootData: Clone + Serialize + DeserializeOwned + Sized {}
+cfg_if!{
+    if #[cfg(feature = "serde")] {
+        pub trait RootData: Clone + Serialize + DeserializeOwned + Sized {}
+        impl<T: Clone + Serialize + DeserializeOwned + Sized> RootData for T {}
+    }
+    else{
+        pub trait RootData: Clone + Sized {}
+        impl<T: Clone + Sized> RootData for T {}
+    }
+}
 pub trait RootKey: Eq + PartialEq + Hash {}
 impl<T: Eq + PartialEq + Hash> RootKey for T {}
-impl<T: Clone + Serialize + DeserializeOwned + Sized> RootData for T {}
 
 pub trait MACSignature<V: RootData, T: RoutingSystem + ?Sized>: RootData
 {
@@ -37,16 +50,3 @@ pub trait MACSystem<T: RoutingSystem + ?Sized>: Default {
 }
 pub type MAC<V, T> = <<T as RoutingSystem>::MACSystem as MACSystem<T>>::MACSignatureType<V>;
 
-/// Appendix B. Protocol Parameters
-pub struct ProtocolParams {
-    pub dedup_ttl: Duration,
-    pub cleanup_timer: Duration,
-}
-impl Default for ProtocolParams {
-    fn default() -> Self {
-        Self {
-            dedup_ttl: Duration::from_secs(60),
-            cleanup_timer: Duration::from_secs(15),
-        }
-    }
-}

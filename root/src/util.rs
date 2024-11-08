@@ -1,7 +1,7 @@
 use crate::router::INF;
 use std::cmp::min;
 
-/// Compares whether a < b
+/// Compares whether a < b mod 65536
 ///
 /// # Arguments
 ///
@@ -33,10 +33,10 @@ pub fn increment_by(x: u16, y: u16) -> u16 {
     x.overflowing_add(y).0
 }
 
-pub fn sum_inf(cost_a: u16, cost_b: u16) -> u16 {
-    if cost_a == INF || cost_b == INF {
+pub fn sum_inf(metric_a: u16, metric_b: u16) -> u16 {
+    if metric_a == INF || metric_b == INF {
         INF
     } else {
-        min((INF - 1) as u32, cost_a as u32 + cost_b as u32) as u16
+        min((INF - 1) as u32, metric_a as u32 + metric_b as u32) as u16
     }
 }

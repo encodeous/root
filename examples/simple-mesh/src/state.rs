@@ -4,12 +4,10 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::Sender;
 use serde::{Deserialize, Serialize};
 use root::router::Router;
-use uuid::Uuid;
 use root::framework::RoutingSystem;
 use crate::link::NetLink;
 use crate::routing::IPV4System;
 use serde_with::serde_as;
-use tokio_util::codec::{Framed, FramedRead, FramedWrite, LengthDelimitedCodec};
 use tokio_util::sync::CancellationToken;
 use crate::packet::{NetPacket, RoutedPacket};
 
@@ -34,11 +32,6 @@ pub struct OperatingState {
     pub pings: HashMap<<IPV4System as RoutingSystem>::NodeAddress, Instant>,
     pub log_routing: bool,
     pub log_delivery: bool,
-}
-
-pub struct SyncState{
-    pub ps: PersistentState,
-    pub os: OperatingState
 }
 
 #[derive(Clone)]

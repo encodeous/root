@@ -1,8 +1,9 @@
 [workspace]
+resolver = "2"
 
 members = [
     "root",
     "examples/mesh-vis",
     "examples/simple-mesh",
-    "examples/graph-gen"
-]
+    "examples/graph-gen",
+    "examples/super-simple"]
